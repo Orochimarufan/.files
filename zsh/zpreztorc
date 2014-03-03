@@ -36,7 +36,8 @@ zstyle ':prezto:load' pmodule \
   'syntax-highlighting' \
   'git' \
   'python' \
-  'pacman'
+  'pacman' \
+  'command-not-found'
 
 #
 # Editor

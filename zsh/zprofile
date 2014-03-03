@@ -44,6 +44,7 @@ typeset -gU cdpath fpath mailpath path
 # Set the list of directories that Zsh searches for programs.
 path=(
   $HOME/.local/bin
+  $HOME/bin
   /usr/local/{bin,sbin}
   $path
 )
@@ -75,4 +76,7 @@ TMPPREFIX="${TMPDIR%/}/zsh"
 if [[ ! -d "$TMPPREFIX" ]]; then
   mkdir -p "$TMPPREFIX"
 fi
+
+# Local overrides
+[[ -e "$DOTFILES/zsh/zprofile.local" ]] && source "$DOTFILES/zsh/zprofile.local"
 

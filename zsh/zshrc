@@ -12,3 +12,27 @@ fi
 
 # Customize to your needs...
 
+# Revive old gst alias from OMZ/git
+alias gst="git status"
+
+# git update fork
+# Merge upstream
+function gupf {
+    (
+    set -e
+    local ORIGIN=${1-origin}
+    local UPSTREAM=${2-upstream}
+    git fetch $ORIGIN
+    git fetch $UPSTREAM
+    git checkout $ORIGIN/master
+    git checkout -b merge
+    git merge $UPSTREAM/master -m "merge upstream from `git ls-remote --get-url $UPSTREAM`"
+    git checkout master
+    git rebase merge
+    git branch -d merge
+    )
+}
+
+# Local overrides
+[[ -e "$DOTDIR/zsh/zshrc.local" ]] && source "$DOTDIR/zsh/zshrc.local"
+

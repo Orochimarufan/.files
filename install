@@ -1,5 +1,5 @@
 #!/bin/zsh
-# .files installer
+# .files/installer
 # (c) 2014 MORI Taeyeon
 
 # Paths & Utils
@@ -10,23 +10,26 @@ source "$DOT/zsh/lib.zsh"
 
 # Parse commandline
 OVERWRITE=false
+ASK=true
 
 function print_usage() {
-    echo "Usage: $0 [--help] [--overwrite]"
+    echo "Usage: $1 [--help] [--overwrite] [--dont-ask]"
     echo
     echo "Install Tae's dotfiles"
     echo
     echo "Parameters:"
     echo "    -h, --help    Display this help message"
     echo "    --overwrite   Just overwrite existing dotfiles"
+    echo "    --dont-ask    Don't ask questions. Use default values"
 }
 
 for arg in "$@"; do
     [[ -z "$STATE" ]] && {
         case "$arg" in
-            -h|--help) print_usage; exit 0;;
+            -h|--help) print_usage "$0"; exit 0;;
             --overwrite) OVERWRITE=true;;
-            *) print_usage; exit 1;;
+            --dont-ask) ASK=false;;
+            *) print_usage "$0"; exit 1;;
         esac
     } || {
         case "$STATE" in
@@ -59,13 +62,19 @@ msg "Updating git submodules..."
 git submodule update --init --recursive
 
 # Ask questions about user
-msg "Asking questions..."
+$ASK && msg "Asking questions..." || err "Not asking any questions:"
 
 [[ -e "$DOT/user-info" ]] && source "$DOT/user-info"
 
-[[ -z "$REAL_NAME" ]] && REALNAME=`grep "^$USER:[^:]*:$UID:" /etc/passwd | cut -d: -f5 | cut -d, -f1`
-ask "Real name" REALNAME
-ask "E-Mail address" EMAIL
+[[ -z "$REALNAME" ]] && REALNAME=`grep "^$USER:[^:]*:$UID:" /etc/passwd | cut -d: -f5 | cut -d, -f1`
+
+if $ASK; then
+    ask "  Real name" REALNAME
+    ask "  E-Mail address" EMAIL
+else
+    color 36 echo "  default REALNAME=\"$REALNAME\""
+    color 36 echo "  default EMAIL=\"$EMAIL\""
+fi
 
 generate "$DOT/user-info" <<EOF
 REALNAME="$REALNAME"

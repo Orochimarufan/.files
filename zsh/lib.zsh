@@ -37,7 +37,7 @@ function random_choice() {
         shuf -n1 -e "$@"
     else
         local NUMBER=${RANDOM%$#+1}
-        echo ${!NUMBER}
+        echo ${(P)NUMBER}
     fi
 }
 

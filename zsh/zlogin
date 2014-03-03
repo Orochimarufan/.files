@@ -16,7 +16,8 @@
 
 # Print a random, hopefully interesting, adage.
 if (( $+commands[fortune] )); then
+  print -n "\e[34m"
   fortune -a
-  print
+  print "\e[0m"
 fi
 
