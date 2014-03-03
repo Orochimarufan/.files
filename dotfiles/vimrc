@@ -1,0 +1,108 @@
+set modeline
+
+" General
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+set hi=700 "history
+
+" Filetype
+filetype plugin on
+filetype indent on
+
+set ar "autoread
+
+" Shortcuts
+let mapleader=","
+let g:mapleader=","
+
+" Fast Saving
+nmap <leader>w: :w!<cr>
+
+" User interface
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Movement with j/k
+set so=7
+
+" Wildmenu
+set wildmenu
+set wildignore=*.o,*~,*.pyc,*.pyo
+
+" Ruler
+set ru "ruler
+set nu "number
+
+" Cmd Bar
+set ch=2 "cmdheight
+
+set hid
+
+" Backspace
+set backspace=eol,start,indent
+set whichwrap+=<,>,h,l
+
+" Search
+set ic "ignorecase
+set sc "smartcase
+set hlsearch
+set incsearch
+
+set lazyredraw
+set magic
+
+" Brackets
+set sm "showmatch
+set mat=2
+
+" Errors
+set noeb "noerrorbells
+set novb "novisualbell
+set t_vb=
+set tm=500
+
+" Colors & Fonts
+"""""""""""""""""""""""""""""""""""""""""""""""""
+syntax enable
+
+colorscheme desert
+set bg=dark "background
+
+set enc=utf8 "encoding
+set ffs=unix,dos,mac
+
+" Files
+"""""""""""""""""""""""""""""""""""""""""""""""""
+set nobackup
+set nowb
+set noswapfile
+
+" Text
+"""""""""""""""""""""""""""""""""""""""""""""""""
+" Tabs
+set et "expandtab
+set smarttab
+set sw=4 "shiftwidth
+set ts=4 "tabstop
+" Indents
+set ai "autoindent
+set si "smartindent
+set wrap
+" Lin eBreak
+set lbr
+set tw=500
+
+" Buffers
+""""""""""""""""""""""""""""""""""""""""""""""""""
+set switchbuf=useopen,usetab,newtab
+set stal=2
+
+" Status Line
+""""""""""""""""""""""""""""""""""""""""""""""""""
+set laststatus=2
+set statusline=\ %{HasPaste()}%F%m%r%h\ %w\ \ CWD:\ %r%{getcwd()}%h\ \ \ Line:\ %l
+
+function! HasPaste()
+	if &paste
+		return 'Paste Mode '
+	end
+	return ''
+endfunction
+
