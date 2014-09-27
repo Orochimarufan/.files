@@ -1,0 +1,94 @@
+#!/bin/bash
+# (c) 2012-2014 MORI Taeyeon
+# Convert video for playback on Sony PSP
+
+usage() {
+    echo "Usage: `basename "$1"` [-subs] [-nothumb] <infile> [outfile] [-- <HandBrakeCLI options>]"
+    echo
+    echo "ffpsp (c) 2012-2014 MORI Taeyeon"
+    echo "Convert a video for Sony PSP"
+    echo
+    echo "Positional Arguments:"
+    echo -e "\tinfile\t\tInput file"
+    echo -e "\toutfile\t\tOutput file (default: same name in psp/ subdir)"
+    echo
+    echo "Options:"
+    echo -e "\t-h\t\tDisplay this help message and exit."
+    echo -e "\t-subs\t\tHardcode softsubs"
+    echo -e "\t-nothumb\tDon't generate Thumbnails"
+    echo
+    echo "Override Application executables:"
+    echo -e "\t-avprobe -ffmpeg -hbcli -videothumb"
+    echo
+    echo "Additional HB-CLI options may be added after a '--' (if you know what you're doing!)"
+}
+
+# commandline options
+SUBTITLES=false
+THUMBNAIL=true
+INPUT_FILE=
+OUTPUT_FILE=
+
+avprobe=avprobe
+hbcli=HandBrakeCLI
+ffmpeg=ffmpeg
+videothumb=videothumb
+
+# Parse commandline options
+pos_args=0
+next=
+for i in "$@"; do
+    shift;
+    if [[ -z "$next" ]]; then
+        case "$i" in
+        -subs)
+            SUBTITLES=true;;
+        -nothumb)
+            THUMBNAIL=false;;
+        -avprobe|-ffmpeg|-hbcli|-videothumb)
+            next=${1#-};;
+        --)
+            break;;
+        -h|-help|--help)
+            usage $0
+            exit 0;;
+        *)
+            case $pos_args in
+                0) INPUT_FILE=$i;;
+                1) OUTPUT_FILE=$i;;
+            esac
+            pos_args=$[$pos_args+1];;
+        esac
+    else
+        eval "$next=\"\$i\""
+        next=
+    fi
+done
+[[ $pos_args -lt 1 || $pos_args -gt 2 ]] && usage $0 && exit 1
+
+# Generate output filename
+if [[ -z "$OUTPUT_FILE" ]]; then
+    OUTPUT_DIR=`dirname "$INPUT_FILE"`/psp
+    OUTPUT_FILE=`basename "$INPUT_FILE"`
+    OUTPUT_FILE=$OUTPUT_DIR/${OUTPUT_FILE%.*}.mp4
+    if ! [[ -e "$OUTPUT_DIR" ]]; then
+        mkdir -p "$OUTPUT_DIR"
+    elif [[ -e "$OUTPUT_FILE" ]]; then
+        echo "File already exists: \"$OUTPUT_FILE\". Specify it explicitly to overwrite"
+        exit 1
+    fi
+fi
+THUMBNAIL_FILE=${OUTPUT_FILE%.*}.thm
+
+# Handle Softsubs
+if $SUBTITLES && $avprobe "$INPUT_FILE" 2>&1 | grep -i Subtitle | grep -qi ass; then
+    SUB_ARGS="--subtitle-burned 1 -s 1"
+    echo "Found a subtitle Track!"
+fi
+
+# Go!
+$hbcli -X 480 -Y 272 --modulus 16 -E faac -B 128 -R 44.1 -6 stereo -e x264 -r 23.976 -x profile=main:level=30:weightp=1:subq=9:rc-lookahead=20:8x8dct=0:b-pyramid=none:me=umh:bframes=16 -i "$INPUT_FILE" -o "$OUTPUT_FILE" -q 20 $SUB_ARGS "$@" || exit $?
+
+
+$THUMBNAIL && $videothumb "$OUTPUT_FILE" "$THUMBNAIL_FILE" -s 160x120 || exit $?
+

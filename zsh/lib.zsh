@@ -19,6 +19,7 @@ function color {
 }
 
 alias msg="color 34 echo"
+alias warn="color 33 echo"
 alias err="color 31 echo"
 
 # Ask a question

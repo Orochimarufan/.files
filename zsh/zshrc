@@ -34,5 +34,5 @@ function gupf {
 }
 
 # Local overrides
-[[ -e "$DOTDIR/zsh/zshrc.local" ]] && source "$DOTDIR/zsh/zshrc.local"
+[[ -e "$DOTFILES/zsh/zshrc.local" ]] && source "$DOTFILES/zsh/zshrc.local"
 

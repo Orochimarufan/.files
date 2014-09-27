@@ -1,0 +1,98 @@
+#!/bin/bash
+# (c) 2012-2014 MORI Taeyeon
+# Batch-convert videos for playback on Sony PSP
+
+usage() {
+    echo "Usage: `basename "$1"` [-subs] [-nothumb] [-log <path>] [-out <path>] <file [...]>"
+    echo
+    echo "ffpsp-batch (c) 2012-2014 MORI Taeyeon"
+    echo "Batch-convert videos for Sony PSP"
+    echo
+    echo "Options:"
+    echo -e "\t-h\t\tDisplay this help message and exit."
+    echo -e "\t-subs\t\tHardcode softsubs"
+    echo -e "\t-nothumb\tDon't generate Thumbnails"
+    echo -e "\t-log <path>\tThe logfile path"
+    echo -e "\t-out <path>\tThe output directory"
+    echo
+    echo "Override Application executables: -<prog> <path>"
+    echo -e "\t-avprobe -ffmpeg -hbcli -videothumb -ffpsp"
+}
+
+FFPSP_OPT=()
+FILES=()
+
+log="${XDG_CACHE_HOME-$HOME/.cache}/ffpsp/ffpsp-batch.$(date +%Y%m%d-%H%M).$$.log"
+
+ffpsp=ffpsp
+
+# Parse commandline options
+next=
+for i in "$@"; do
+    shift
+    if [[ -z "$next" ]]; then
+        case "$i" in
+        -subs|-nothumb)
+            FFPSP_OPT+=("$i");;
+        -avprobe|-ffmpeg|-hbcli|-videothumb)
+            FFPSP_OPT+=("$i")
+            next=ffpsp-opt;;
+        -ffpsp|-out|-log)
+            next=${i#-};;
+        -h|-help|--help)
+            usage "$0"
+            exit 0;;
+        --)
+            FILES+=("$@")
+            break;;
+        *)
+            FILES+=("$i")
+        esac
+    elif [[ "$next" == "ffpsp-opt" ]]; then
+        FFPSP_OPT+=("$i")
+        next=
+    else
+        eval "$next=\"\$i\""
+        next=
+    fi
+done
+
+# Create log dir
+mkdir -p "`dirname "$log"`"
+
+# Set title
+echo -ne "\033]1;ffpsp\007"
+
+# sort input files, for convenience
+readarray -t sorted < <(for a in "${FILES[@]}"; do echo "$a"; done | sort)
+
+# Report Queue
+echo "-- ffpsp-batch v1 --" | tee "$log"
+echo "[[ QUEUE ]]"
+for f in "${sorted[@]}"; do echo "`basename "$f"`"; done
+echo
+
+# Process queue
+i=0
+for f in "${sorted[@]}"; do
+    # Report progress.
+    i=$[ i + 1 ]
+    echo [[ \>\> $f \<\< ]] | tee -a "$log"
+    echo -ne "\033]2;[ffpsp] ($i of ${#sorted[@]}) $f\007"
+
+    # Generate output filename
+    OUTPUT_DIR=${out-$(dirname "$f")/psp}
+    OUTPUT_FILE=`basename "$f"`
+    OUTPUT_FILE=$OUTPUT_DIR/${OUTPUT_FILE%.*}.mp4
+    if ! [[ -e "$OUTPUT_DIR" ]]; then
+        mkdir -p "$OUTPUT_DIR"
+    elif [[ -e "$OUTPUT_FILE" ]]; then
+        echo "File already exists: \"$OUTPUT_FILE\". Skipping"
+        continue
+    fi
+
+    $ffpsp "${FFPSP_OPT[@]}" "$f" "$OUTPUT_FILE" 2> >(tee -a "$log" >&2)
+done
+
+# Notify completion
+echo -ne "\033]1;ffpsp - done\007\033]2;[ffpsp] done.\007"

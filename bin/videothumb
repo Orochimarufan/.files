@@ -1,0 +1,63 @@
+#!/usr/bin/python3
+# (c) 2013 MORI Taeyeon
+# Create Video Thumbnails using FFmpeg
+
+from __future__ import print_function, division, absolute_import, unicode_literals
+
+import subprocess
+import re
+import os
+import random
+import argparse
+
+ffmpeg_cmd = ["ffmpeg"]
+ffprobe_cmd = ["ffmpeg", "-i"]
+regexp = re.compile(r"Duration: (\d+):(\d\d):(\d\d).\d\d,")
+
+def getdur(file):
+    cmd = ffprobe_cmd + [file]
+    pipe = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+    pipe.wait()
+    try:
+        for line in pipe.stderr:
+            sys.stderr.buffer.write(line)
+            line = str(line, "utf8").rstrip()
+            if "Duration:" in line:
+                dur = regexp.search(line)
+                return int(dur.group(1))*3600+int(dur.group(2))*60+int(dur.group(3))
+        else:
+            raise ValueError("Duration not in FFMpeg output!")
+    finally:
+        sys.stderr.buffer.flush()
+        sys.stderr.flush()
+
+def randpos(file):
+    dur = getdur(file)
+    pos = random.randint(1, dur)
+    print("Dur: %i, Pos: %i" % (dur, pos))
+    return pos
+
+def mkthumb(file, pos, target, res=None):
+    cmd = ffmpeg_cmd + ["-ss", pos, "-i", file, "-an", "-vframes", 1, "-f", "image2"]
+    if res is not None:
+        cmd.extend(["-s", res])
+    cmd.append(target)
+    return subprocess.check_call(map(str,cmd))
+
+def main(argv):
+    parser = argparse.ArgumentParser(prog=argv[0])
+    parser.add_argument("input", help="input file name")
+    parser.add_argument("target", help="thumbnail file name")
+    parser.add_argument("-p", help="Position in Video (random if omitted)", type=int)
+    parser.add_argument("-s", help="scale picture (WxH)")
+    args = parser.parse_args(argv[1:])
+    os.stat(args.input)
+    if args.p:
+        mkthumb(args.input, args.p, args.target, args.s)
+    else:
+        mkthumb(args.input, randpos(args.input), args.target, args.s)
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main(sys.argv))
+

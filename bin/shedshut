@@ -1,0 +1,28 @@
+#!/bin/bash
+echo "[ShedShut v1] Waiting for \"$1\" to finish"
+NXC="$IFS";IFS=$'\n'
+ps=($(ps xaht | grep -v grep | grep -v "$0" | grep "$1" | awk '{ printf "("$1") "; for (i=5; i<=NF; i++) printf $i" "; printf "\n" }'))
+IFS="$NXC"
+echo "Expression matches on:"; for i in "${ps[@]}"; do echo "    $i"; done
+#echo "Filtering Keywords: 'grep', '$0'"
+if test -z "$2"; then cmd="shutdown -h now"; else cmd="$2"; fi
+echo "Sheduled Command: $cmd"
+if ! test `id -u` = 0; then echo "WARNING: Your Command may not work as user '$(id -un)'"; fi
+
+f="date +%H:%M:%S"
+
+watch() {
+    declare -g -a watch_pids=($(ps xaht | grep -v grep | grep -v "$0" | grep "$1" | awk '{ print $1 }'))
+    if test ${#watch_pids[@]} -gt 0; then
+        echo "[$($f)] Processes: ${watch_pids[@]}"
+        return 0
+    else
+        echo "[$($f)] No Processes."
+        return 1
+    fi
+}
+
+while watch $1; do sleep 60; done
+
+echo "[$($f)] Shutting down: $cmd"
+$cmd

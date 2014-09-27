@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import subprocess
+import argparse
+
+def main():
+    try:
+        return main_()
+    except SystemExit as e:
+        try:
+            return int(e.code)
+        except:
+            print(e.code)
+            return 1
+
+def kvpair(x):
+    if x == "YES":
+        return True
+    elif x == "NO":
+        return False
+    elif x == "\\YES":
+        return "YES"
+    elif x == "\\NO":
+        return "NO"
+    else:
+        return x
+
+def main_():
+    argp = argparse.ArgumentParser()
+    argp.add_argument("source", nargs="+")
+    argp.add_argument("destination")
+    argp.add_argument("-p", "--profile", choices=["aac", "m4a", "ogg", "wav", "wma"])
+    argp.add_argument("-u", "--update", help="Only process new files", action="store_true")
+    argp.add_argument("--avconv", default="avconv")
+    argp.add_argument("-m", nargs=2, action="append", type=kvpair, default=[])
+    argp.add_argument("-i", nargs=2, action="append", type=kvpair, default=[])
+    argp.add_argument("-o", nargs=2, action="append", type=kvpair, default=[])
+
+    args = argp.parse_args()
+
+    i_flags = dict()
+    o_flags = dict()
+    m_flags = dict()
+
+    # no video
+    o_flags["vn"] = True
+    m_flags["update"] = args.update
+
+    # capability checks
+    s = subprocess.check_output([args.avconv, "-codecs"], stderr=subprocess.DEVNULL)
+    if b"faac" in s:
+        aac = {"acodec": "faac"}
+    else:
+        aac = {"acodec": "aac", "strict": "experimental"}
+    if b"libvorbis" in s:
+        vorbis = {"acodec": "libvorbis"}
+    else:
+        vorbis = {"acodec": "vorbis", "strict": "experimental"}
+
+    # profiles
+    m_flags["fileext"] = "raw"
+
+    if args.profile == "aac":
+        m_flags["fileext"] = "aac"
+        o_flags.update(aac)
+    elif args.profile == "m4a":
+        m_flags["fileext"] = "m4a"
+        o_flags.update(aac)
+    elif args.profile == "ogg":
+        m_flags["fileext"] = "ogg"
+        o_flags.update(vorbis)
+    elif args.profile == "wav":
+        m_flags["fileext"] = "wav"
+        o_flags["acodec"] = "pcm_f32le"
+    elif args.profile == "wma":
+        m_flags["fileext"] = "wma"
+        o_flags["acodec"] = "wmav2"
+        o_flags["ac"] = 2
+
+    i_flags.update(dict(args.i))
+    o_flags.update(dict(args.o))
+    m_flags.update(dict(args.m))
+
+    if len(args.source) > 1:
+        run_multiple(m_flags, args.avconv, i_flags, args.source, o_flags, args.destination)
+    else:
+        run_once(m_flags, args.avconv, i_flags, args.source[0], o_flags, args.destination)
+    return 0
+
+
+def make_destfile(source, m, destination):
+    if not os.path.isdir(destination):
+        return destination
+    stem, ext = os.path.splitext(source)
+    destfile = ".".join((stem, m["fileext"]))
+    return os.path.join(destination, destfile)
+
+
+def add_args(argv, argdict):
+    for k,v in argdict.items():
+        argv.append("-%s" % k)
+        if v is not True:
+            argv.append(str(v))
+
+
+def make_argv(m, avconv, i, source, o, destination):
+    argv = [avconv]
+    add_args(argv, i)
+    argv.append("-i")
+    argv.append(source)
+    add_args(argv, o)
+    argv.append(make_destfile(source, m, destination))
+    return argv
+
+
+def run_once(m, avconv, i, source, o, destination):
+    dest = make_destfile(source, m, destination)
+    if m["update"] and os.path.exists(dest) and os.stat(dest).st_mtime >= os.stat(source).st_mtime:
+        return
+    try:
+        subprocess.check_call(make_argv(m, avconv, i, source, o, destination))
+    except subprocess.CalledProcessError as e:
+        raise SystemExit("Worker avconv process exited with nonzero return code: %i\nCommand was: %s\nAborting." % (e.returncode, e.cmd))
+
+
+def run_multiple(m, avconv, i, sources, o, destination):
+    if not os.path.isdir(destination):
+        os.mkdir(destination)
+    for source in sources:
+        run_once(m, avconv, i, source, o, destination)
+
+if __name__ == "__main__":
+    main()
+

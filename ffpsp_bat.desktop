@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Exec=ffpsp-batch -subs %F
+Terminal=true
+Name=[ffpsp] Drop files to convert
+Icon=hb-icon

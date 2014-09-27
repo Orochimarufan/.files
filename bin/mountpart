@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+
+import sys, os
+import argparse
+import subprocess
+
+def existing_filename(f):
+    if not os.path.exists(f):
+        raise ValueError("No such file or directory.")
+    return f
+
+def existing_dirname_or_dash(f):
+    if f == '-':
+        pass
+    elif not os.path.exists(f):
+        raise ValueError("No such file or directory.")
+    elif not os.path.isdir(f):
+        raise ValueError("Not a directory: %s" % f)
+    return f
+
+def int_1plus(s):
+    i = int(s)
+    if i < 1:
+        raise ValueError("Index must be greater 0.")
+    return i
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(prog=argv[0])
+    parser.add_argument("image", help="image file", type=existing_filename)
+    parser.add_argument("mountpoint", help="mount point/loop device ['-' uses next available]", type=existing_dirname_or_dash)
+    parser.add_argument("-p", help="partition index, 1-based [default: 1]", type=int_1plus, default=1, metavar="index", dest="part")
+    parser.add_argument("-l", help="Don't mount, just setup the loop device.", action="store_true", default=False)
+    parser.add_argument("-t", help="filesystem type [default: auto]", metavar="vfstype")
+    parser.add_argument("-o", help="mount options [default: none]", metavar="options")
+    parser.add_argument("-parted", help="parted executable [default: parted]", default="parted")
+    parser.add_argument("-mount", help="mount executable [default: mount]", default="mount")
+    parser.add_argument("-losetup", help="losetup executable [default: losetup]", default="losetup")
+    return parser.parse_args(argv[1:])
+
+def main(argv):
+    args = parse_args(argv)
+
+    parted = subprocess.check_output([args.parted, args.image, "-s", "-m", "u", "b", "p"])
+    partitions = parted.split(b";\n")[2:]
+
+    try:
+        part = partitions[args.part-1]
+    except IndexError:
+        raise SystemExit("Partition index out of range: %i, has %i" % (args.part, len(partitions)))
+
+    offset = part.split(b':')[1].rstrip(b'B').decode("ascii")
+
+    if args.l:
+        if args.mountpoint == '-':
+            args.mountpoint = "-f"
+        losetup = [args.losetup, "--show", "--offset", offset, args.mountpoint, args.image]
+        subprocess.check_call(losetup)
+    else:
+        if args.mountpoint == '-':
+            raise ValueError("Mountpoint cannot be '-' unless -l (only setup loop device) is also given")
+        options = "offset=%s" % offset
+        if args.o:
+            options += ',' + args.o
+        mount = [args.mount, args.image, args.mountpoint, "-o", options]
+        if args.t:
+            mount.append("-t")
+            mount.append(args.t)
+        subprocess.check_call(mount)
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main(sys.argv))
