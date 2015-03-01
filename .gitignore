@@ -1,4 +1,7 @@
 /zsh/.*
 user-info
 *.local
+__pycache__
+*.pyc
+*~
 

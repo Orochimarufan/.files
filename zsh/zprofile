@@ -1,8 +1,24 @@
 #
-# Executes commands at login pre-zshrc.
+# Executes commands in every top-level shell
 #
-# Authors:
-#   Sorin Ionescu <sorin.ionescu@gmail.com>
+# ATTENTION: This differs from usual zsh behaviour!
+#            Treat this file as a per-session zshenv instead.
+#
+# Why is this useful? Because it only gets executed once for any given tree
+# of zsh-processes. You can use it to do environment computations that would
+# be too expensive for zshenv.
+#
+# Then why also source it in non-interactive shells?
+# Because it prevents desync between scripts and interactive prompts.
+# Ever tried to debug a script and ended up with "But it works in the prompt!"?
+#
+# That is especially true with X11-Scenarios, since a display-manager usually
+# doesn't source any profile. Which will lead to shells without a login shell in
+# their parent process tree, which means the profile is basically useless.
+#
+# If you need loginshell-only commands, use zlogin instead. If you insist on
+# zprofile, create a .zprofile (note the dot) file in this directory and zsh will
+# treat it as always.
 #
 
 #
@@ -18,7 +34,7 @@ fi
 #
 
 export EDITOR='vim'
-export VISUAL='nano'
+export VISUAL='vim'
 export PAGER='less'
 
 #
@@ -33,9 +49,6 @@ fi
 # Paths
 #
 
-# Ensure path arrays do not contain duplicates.
-typeset -gU cdpath fpath mailpath path
-
 # Set the the list of directories that cd searches.
 # cdpath=(
 #   $cdpath
@@ -49,6 +62,18 @@ path=(
   /usr/local/{bin,sbin}
   $path
 )
+
+# Set the list of directories that Python searches for modules.
+pythonpath=(
+  $DOTFILES/lib/python
+  "${(@s|:|)PYTHONPATH}"
+)
+
+# Ensure path arrays do not contain duplicates.
+typeset -gU cdpath fpath mailpath path pythonpath
+
+# zsh only maps the array and text versions for PATH
+export PYTHONPATH="${(j|:|)pythonpath}"
 
 #
 # Less
@@ -80,4 +105,3 @@ fi
 
 # Local overrides
 [[ -e "$DOTFILES/zsh/zprofile.local" ]] && source "$DOTFILES/zsh/zprofile.local"
-

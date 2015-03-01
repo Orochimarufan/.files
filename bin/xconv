@@ -1,0 +1,151 @@
+#!/usr/bin/python3
+"""
+xconv ffpmeg wrapper based on AdvancedAV
+-----------------------------------------------------------
+    AdvancedAV helps with constructing FFmpeg commandline arguments.
+
+    It can automatically parse input files with the help of FFmpeg's ffprobe tool (WiP)
+    and allows programatically mapping streams to output files and setting metadata on them.
+-----------------------------------------------------------
+    Copyright (c) 2015 Taeyeon Mori
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+"""
+
+from advancedav import SimpleAV
+
+from argparse import ArgumentParser
+from abc import ABCMeta, abstractmethod
+from itertools import chain
+from os.path import isdir, join as build_path, basename, splitext, exists
+
+# == Profile Decorators ==
+profiles = {}
+
+
+def profile(f):
+    profiles[f.__name__] = f
+    return f
+
+
+def output(container="matroska", ext="mkv"):
+    def output(f):
+        f.container = container
+        f.ext = ext
+        return f
+    return output
+
+
+# == Profile definitions ==
+@profile
+@output(container="matroska", ext="mkv")
+def laptop(task):
+    # enable experimental aac codec
+    task.options["strict"] = "-2"
+    # add first video stream
+    for s in task.iter_video_streams():
+        os = task.map_stream(s)
+        os.options["codec"] = "libx264"
+        os.options["vf"] = "scale='if(gt(a,16/10),1280,-1)':'if(gt(a,16/10),-1,800)'" # scale to 1280x800, keeping the aspect ratio
+        os.options["tune"] = "fastdecode", "animation"
+        os.options["profile"] = "main"
+        os.options["preset"] = "fast"
+        break
+    # Add all audio streams (reencode to aac if necessary)
+    for s in task.iter_audio_streams():
+        os = task.map_stream(s)
+        if s.codec != "aac":
+            os.options["codec"] = "aac"
+    # add all subtitle and attachment streams
+    for s in chain(task.iter_subtitle_streams(), task.iter_attachment_streams()):
+        os = task.map_stream(s)
+    # go
+    return True
+
+
+# == Support code ==
+def parse_args(argv):
+    parser = ArgumentParser(prog=argv[0])
+    files = parser.add_argument_group("Files")
+    files.add_argument("inputs", nargs="+", help="The input file(s)")
+    files.add_argument("output", help="The output filename or directory")
+    parser.add_argument("-p", "--profile", choices=profiles.keys(), required=True, help="Specify the profile. See the source code.")
+    parser.add_argument("-m", "--merge", help="Merge streams from all inputs instead of mapping each input to an output", action="store_true")
+    parser.add_argument("-u", "--update", help="Only work on files that don't already exist", action="store_true")
+    progs = parser.add_argument_group("Programs")
+    progs.add_argument("--ffmpeg", default="ffmpeg", help="Path to the ffmpeg executable")
+    progs.add_argument("--ffprobe", default="ffprobe", help="Path to the ffprobe executable")
+    return parser.parse_args(argv[1:])
+
+
+def make_outfile(args, infile):
+    if args.genout:
+        if hasattr(args.profile, "ext"):
+            return build_path(args.output, ".".join((splitext(basename(infile))[0], args.profile.ext)))
+        else:
+            return build_path(args.output, basename(infile))
+    else:
+        return args.output
+
+
+def main(argv):
+    import logging
+    logging.basicConfig(level=logging.DEBUG)
+
+    args = parse_args(argv)
+
+    args.profile = profiles[args.profile]
+
+    args.genout = isdir(args.output)
+    if not args.genout:
+        if len(args.inputs) > 1:
+            print("Output path '%s' is not a directory." % args.output)
+            return -1
+
+    aav = SimpleAV(ffmpeg=args.ffmpeg, ffprobe=args.ffprobe)
+
+    tasks = []
+
+    if args.merge:
+        task = aav.create_job(make_outfile(args, args.inputs[0]))
+
+        for input in args.inputs:
+            task.add_input(input)
+
+        tasks.append(task)
+
+    else:
+        for input in args.inputs:
+            out = make_outfile(args, input)
+            if args.update and exists(out):
+                continue
+            task = aav.create_job(out, args.profile.container if hasattr(args.profile, "container") else None)
+            task.add_input(input)
+            tasks.append(task)
+
+    for task in tasks:
+        if not args.profile(task):
+            print("Failed to apply profile for '%s'" % basename(task.name))
+            return 1
+
+    for task in tasks:
+        task.commit()
+
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main(sys.argv))
+

@@ -1,0 +1,6 @@
+#!/bin/sh
+echo "Setting up pulseaudio tunnels for the G930 Headset"
+echo -n "G930 Sink Tunnel: "
+pactl load-module module-tunnel-sink-new server=10.66.64.4 sink=alsa_output.usb-Logitech_Logitech_G930_Headset-00-Headset.analog-stereo sink_name=tunnel.arch.g930 sink_properties=\"device.description=\'G930 Headset\'\"
+echo -n "G930 Source Tunnel: "
+pactl load-module module-tunnel-source-new server=10.66.64.4 source=alsa_input.usb-Logitech_Logitech_G930_Headset-00-Headset.analog-mono source_name=tunnel.arch.g930 source_properties=\"device.description=\'G930 Headset\'\"

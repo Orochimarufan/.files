@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# PulseAudio tunnel script
+# (c) 2014-2015 Taeyeon Mori
+# Do what the fuck you want with it. (No warranty, etc)
+
+# This script will scrape the PA config file for tunnel modules
+# and load them via pactl.
+# This is useful to recover from network outages and similar things.
+
+set -e
+source "${DOTFILES-$HOME/.files}/lib/libpulse-config.sh"
+
+# Dry run
+test "$1" = "-dry" && function pactl() { echo $@; }
+
+# Work on the tunnels
+pa_find_config_lines "load-module module-tunnel"
+for tunnel in "${PA_CONFIG_LINES[@]}"; do
+    pa_parse_tunnel_line "$tunnel"
+
+    echo -en "\033[32mSetting up tunnel to $TUN_SERVER/$TUN_DEVICE: $TUN_NAME "
+    test -n "$TUN_DESCRIPTION" && echo -n "$TUN_DESCRIPTION "
+
+    echo -en "\033[31m>> "
+    pactl $tunnel || echo "Couldn't setup tunnel: $tunnel"
+
+    echo -en "\033[0m"
+done

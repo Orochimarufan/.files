@@ -1,0 +1,61 @@
+#!/bin/zsh -i
+# .files|Argshell
+# (c) 2015 Taeyeon Mori
+
+# Synopsis
+function synopsis() {
+    print "Synopsis: $1 [-h] [-e] [-l|-ll]  <command...>"
+    print ""
+    print "Run a command repeatedly, with different arguments."
+    print ""
+    print "Arguments:"
+    print "    -h    Show this help message"
+    print "    -l    Treat additional arguments as literal"
+    print "    -ll   Treat the whole command as literal"
+    print ""
+    print "[.files|argshell] Ver 1.0 (c) 2015 Taeyeon Mori"
+}
+
+# Parse options
+EVAL_LINE=true
+EVAL_CMD=true
+
+while true; do
+    if [ "$1" = "-l" ]; then
+        EVAL_LINE=false
+    elif [ "$1" = "-ll" ]; then
+        EVAL_LINE=false
+        EVAL_CMD=false
+    elif [ "$1" = "-h" ]; then
+        synopsis "$0"
+        exit 0
+    else
+        break
+    fi
+    shift
+done
+
+if [ $# -lt 1 ]; then
+    synopsis "$0"
+    exit 1
+fi
+
+# The prompt
+PROMPT="$* => "
+
+prompt() {
+    echo -n "$2"
+    read $1
+}
+
+# Do the work
+while prompt args "$PROMPT"; do
+    if $EVAL_LINE; then
+        eval "$@" $args
+    elif $EVAL_CMD; then
+        eval "$@" `python -c "import shlex;print(' '.join(\"'%s'\" % s.replace(\"'\",\"'\''\") for s in shlex.split(r'''$args''')))"`
+    else
+        "$@" $args
+    fi
+done
+

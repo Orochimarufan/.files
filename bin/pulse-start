@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# PulseAudio startup script
+# (c) 2014-2015 Taeyeon Mori
+# Do what the fuck you want with it. (No warranty, etc)
+
+# This is an advanced version of start-pulseaudio-x11 with per-host
+# configuration support.
+# Please note that to make use of it, pulseaudio must not be set up
+# to start on demand.
+# You can achieve this by setting "autospawn" to "no" in client.conf.
+# Copy it from /etc/pulse/client.conf if it doesn't exist.
+# You'll also have to set up some kind of automatic start for this script
+# if you want pulseaudio to be available automatically (you just disabled autospawn!)
+
+set -e
+source "${DOTFILES-`dirname "$0"`/..}/lib/libpulse-config.sh"
+
+# Dry run
+test "$1" = "-dry" && function exec { echo $@; }
+
+# == Check for machine-specific config file
+pa_find_host_config
+test -n "$PA_HOST_CONFIG" && STARTUP_FILE="$PA_HOST_CONFIG"
+
+# == Additional Modules ==
+declare -a LOAD_MODULES
+
+# Register with X11.
+# Adapted from start-pulseaudio-x11 script.
+if [ x"$DISPLAY" != x ]; then
+    color 34 echo "Registering with X11 Display $DISPLAY."
+
+    push LOAD_MODULES "module-x11-publish display=$DISPLAY"
+    #push LOAD_MODULES "module-x11-cork-request display=$DISPLAY"
+
+    if [ x"$SESSION_MANAGER" != x ]; then
+        push LOAD_MODULES "module-x11-xsmp display=$DISPLAY session_manager=$SESSION_MANAGER"
+    fi
+fi
+
+# == Build Arguments ==
+declare -a ARGS=(--start)
+
+if test -n "$STARTUP_FILE"; then
+    push ARGS -nF "$STARTUP_FILE"
+fi
+
+for (( i=0; i<${#LOAD_MODULES[@]}; i++ )); do
+    push ARGS -L "${LOAD_MODULES[i]}"
+done
+
+# == Run pulseaudio ==
+exec "$PA_EXECUTABLE" "${ARGS[@]}" "$@"
