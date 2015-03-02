@@ -11,7 +11,7 @@ function throw {
 }
 
 # Figure out build directory
-tmpbuild=$TMPDIR/aur.sh.$$
+tmpbuild=${TMPDIR-/tmp}/aur.sh.$$
 build="${BUILDDIR:-$tmpbuild}"
 test -d "$build" || mkdir -p "$build" || exit 1
 
