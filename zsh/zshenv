@@ -6,6 +6,6 @@
 #
 
 # Source the profile on every top-level shell
-if [[ "$SHLVL" -eq 1 ]]; then
+if [[ "$SHLVL" -eq 1 && ! -o LOGIN ]]; then
   source "$DOTFILES/zsh/zprofile"
 fi

@@ -31,6 +31,7 @@ Notable ones are:
 - schedshut : Shutdown when a specific task/process finishes.
 - mountpart : Mount a partition in a whole-disk imagefile.
 - argshell  : call the same application repeatedly, with a common set of arguments.
+- fix-steam-runtime.sh : Fix Steam runtime on Arch Linux (And others with "too new" libstdc++ and friends)
 
 .files/etc
 ----------

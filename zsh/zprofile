@@ -56,9 +56,8 @@ fi
 
 # Set the list of directories that Zsh searches for programs.
 path=(
-  $DOTFILES/bin
   $HOME/.local/bin
-  $HOME/bin
+  $DOTFILES/bin
   /usr/local/{bin,sbin}
   $path
 )

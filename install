@@ -118,7 +118,7 @@ ZDOTDIR="\$DOTFILES/zsh"
 source "\$ZDOTDIR/zshenv"
 EOF
 
-for file in zshrc zpreztorc zlogin zlogout; do
+for file in zshrc zpreztorc zlogin zlogout zprofile; do
     relink "$ZSH/$file" "$ZSH/.$file"
 done
 
