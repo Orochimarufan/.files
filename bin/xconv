@@ -29,6 +29,7 @@ from argparse import ArgumentParser
 from abc import ABCMeta, abstractmethod
 from itertools import chain
 from os.path import isdir, join as build_path, basename, splitext, exists
+from os import environ
 
 # == Profile Decorators ==
 profiles = {}
@@ -48,16 +49,21 @@ def output(container="matroska", ext="mkv"):
 
 
 # == Profile definitions ==
+keepres = bool(environ.get("XCONV_KEEPRES", None))
+
 @profile
 @output(container="matroska", ext="mkv")
 def laptop(task):
     # enable experimental aac codec
     task.options["strict"] = "-2"
+    print(list(task.iter_video_streams()), list(task.iter_audio_streams()), list(task.iter_subtitle_streams()))
     # add first video stream
     for s in task.iter_video_streams():
+        print(s, s.codec)
         os = task.map_stream(s)
         os.options["codec"] = "libx264"
-        os.options["vf"] = "scale='if(gt(a,16/10),1280,-1)':'if(gt(a,16/10),-1,800)'" # scale to 1280x800, keeping the aspect ratio
+        if not keepres:
+            os.options["vf"] = "scale='if(gt(a,16/10),1280,-1)':'if(gt(a,16/10),-1,800)'" # scale to 1280x800, keeping the aspect ratio
         os.options["tune"] = "fastdecode", "animation"
         os.options["profile"] = "main"
         os.options["preset"] = "fast"

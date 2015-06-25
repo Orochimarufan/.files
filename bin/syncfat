@@ -1,0 +1,42 @@
+#!/bin/zsh
+# (c) 2015 Taeyeon Mori
+# Sync files while making sure to replace characters invalid on FAT
+# Hidden files (.*) are ignored
+# Useful for copying music to a music player or smartphone sd-card
+
+source "$DOTFILES/lib/libzsh-utils.zsh"
+
+if [[ -z "$1" || -z "$2" || "$1" == "--help" || "$1" == "-h" || "$1" == "help" ]]; then
+    echo "Usage: $0 <source_dir> <dest_dir> [cp-opts]"
+    exit 1
+fi
+
+set -e
+
+destination=`realpath "$2"`
+
+cd "$1"
+IFS=$'\0'
+
+function sanitize {
+    local temp
+    temp="${*#./}" # Remove ./
+    echo ${temp//[:?<>*|^]/_} # Replace invalid characters
+}
+
+msg "Creating structure..."
+for dir in $(find . -not -path "*/.*" -type d -print0); do
+    target="$destination/$(sanitize $dir/)"
+    test -d "$target" || mkdir "$target"
+done
+
+msg "Copying files..."
+for source in $(find . -not -path "*/.*" -type f -print0); do
+    target="$destination/$(sanitize $source)"
+    if [[ ! -e "$target" || "$target" -ot "$source" || $(stat -c%s "$source") -ne $(stat -c%s "$target") ]]; then
+        color 31 cp $3 "$source" "$target"
+    elif [[ "$3" =~ "-v" ]]; then
+        color 33 echo "OK $target"
+    fi
+done
+

@@ -1,4 +1,5 @@
 #!/bin/zsh
+# (c) 2014-2015 Taeyeon Mori
 # vim: ft=sh:ts=2:sw=2:et
 
 # Load libraries and configuraion
@@ -16,15 +17,60 @@ build="${BUILDDIR:-$tmpbuild}"
 test -d "$build" || mkdir -p "$build" || exit 1
 
 # Parse commandline: anything prefixed with - is a makepkg option
-packages=(${@##-*})
-makepkg_flags=(${@##[^\-]*})
+packages=()
+flags=()
+aur_get=aur_get_old # new one not working yet
+DL_ONLY=false
 
-if echo "${makepkg_flags[*]}" | grep -q "\\-X"; then
-  warn "[AUR] Building was disabled (-X)"
-  DL_ONLY=true
-else
-  DL_ONLY=false
-fi
+for cx in "$@"; do
+  case "$cx" in
+    --old-aur)
+      warn "[AUR] Using old AUR (--old-aur)"
+      aur_get=aur_get_old;;
+    -X|--download-only)
+      warn "[AUR] Building was disabled (-X)"
+      DL_ONLY=true;;
+    -h|--help)
+      echo "Usage $0 [-h] [-X] [makepkg options] <packages>"
+      echo
+      echo "aur.sh options:"
+      echo "  -h, --help    Display this message"
+      echo "  -X, --download-only"
+      echo "                Only download the PKGBUILDs from AUR, don't build"
+      echo "  --old-aur     Use the old (non-git) AUR"
+      echo
+      echo "Useful makepkg options:"
+      echo "  -i            Install package after building it"
+      echo "  -s            Install dependencies from official repos"
+      ;;
+    -*)
+      makepkg_flags=("${makepkg_flags[@]}" "$cx");;
+    *)
+      packages=("${packages[@]}" "$cx");;
+  esac
+done
+
+# aur functions
+aur_get_old() {
+  [ -d "$1/.git" ] && error "Local copy of $1 is from AUR4. Cannot use --old-aur with it!" && return 32
+  curl https://aur.archlinux.org/packages/${1:0:2}/$1/$1.tar.gz | tar xz
+}
+
+aur_get_aur4() {
+  if [ -d "$1/.git" ]; then (
+    cd "$1"
+    git pull
+  ) else
+    if [ -e "$1" ]; then
+      warn "$1 PKGBUILD directory exists but is not a git clone."
+      ans=n
+      ask "Overwrite $1?" ans
+      [ "$ans" = "y" ] || [ "$ans" = "yes" ] || [ "$ans" = "Y" ] || return 32
+      rm -rf $1
+    fi
+    git clone https://aur4.archlinux.org/$1.git/
+  fi
+}
 
 # Print some info
 msg "[AUR] AURDIR=$AURDIR; PKGDEST=$PKGDEST"
@@ -44,8 +90,7 @@ for p in "${packages[@]}"; do
     grep -q "#CUSTOMPKG" $p/PKGBUILD && \
     warn "[AUR] $p: Found #CUSTOMPKG; not updating PKGBUILD from AUR!" \
   } || \
-    { curl https://aur.archlinux.org/packages/${p:0:2}/$p/$p.tar.gz | tar xz } || \
-    throw 2 "[AUR] $p: Couldn't download package"
+    $aur_get $p || throw 2 "[AUR] $p: Couldn't download package"
 
   if $DL_ONLY; then continue; fi
 

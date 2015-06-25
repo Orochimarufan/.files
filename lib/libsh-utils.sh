@@ -14,8 +14,9 @@ color() {
     local COLOR=$1 && shift
     echo -en "\e[${COLOR}m"
     "$@"
+    local res=$?
     echo -en "\e[0m"
-    return $?
+    return $res
 }
 
 # Append to array

@@ -240,8 +240,8 @@ class InputFile(File):
 
     # -- Probe streams
     _reg_probe_streams = re.compile(
-        r"Stream #0:(?P<id>\d+)(?:\((?P<lang>\w+)\))?: (?P<type>\w+): (?P<codec>\w+)"
-        r"(?: \((?P<profile>[^\)]+)\))?(?P<extra>.+)?"
+        r"Stream #0:(?P<id>\d+)(?:\((?P<lang>[^\)]+)\))?: (?P<type>\w+): (?P<codec>\w+)"
+        r"(?: \((?P<profile>[^\)]+)\))?\s*(?P<extra>.+)?"
     )
 
     def _initialize_streams(self, probe: str=None) -> Iterator:

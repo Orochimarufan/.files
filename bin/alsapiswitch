@@ -1,0 +1,51 @@
+#!/usr/bin/python
+# (c) 2015 Taeyeon Mori
+# Easily toggle the IEC958 In Phase Inverse of an ALSA card
+# Useful for looping back audio from a PS3 through a CMedia card with IEC958-In
+
+from PyQt5 import QtCore, QtGui, QtWidgets
+import subprocess
+import sys
+
+
+class MainWindow(QtWidgets.QMainWindow):
+    amixer_args = ("-c", "2")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.l = QtWidgets.QHBoxLayout()
+
+        self.label = QtWidgets.QLabel()
+        self.label.setObjectName("MainWindow.label")
+        self.l.addWidget(self.label)
+
+        self.button = QtWidgets.QPushButton("Toggle")
+        self.button.setObjectName("MainWindow.button")
+        self.button.clicked.connect(self.on_button_clicked)
+        self.l.addWidget(self.button)
+
+        self.cw = QtWidgets.QWidget()
+        self.cw.setLayout(self.l)
+        self.setCentralWidget(self.cw)
+
+        self.sc = QtWidgets.QShortcut(QtGui.QKeySequence("t"), self)
+        self.sc.activated.connect(self.on_button_clicked)
+
+        self.get_state()
+
+    def call(self, *args):
+        return subprocess.check_output(("amixer",) + self.amixer_args + args).decode("utf-8")
+
+    def get_state(self):
+        self.label.setText(self.call("sget", "IEC958 In Phase Inverse"))
+
+    def on_button_clicked(self):
+        self.label.setText(self.call("sset", "IEC958 In Phase Inverse", "toggle"))
+
+
+app = QtWidgets.QApplication(sys.argv)
+win = MainWindow()
+win.show()
+app.exec()
+

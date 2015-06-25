@@ -1,0 +1,6 @@
+#!/bin/sh
+# Create a playback loop from source $1 to the default sink
+test -n "$1" && loopdev="-d $1"
+test -n "$2" && rate="$2" || rate="44100"
+pacat -r $loopdev --rate 44100 --passthrough --client-name "paloop" | pacat -p --rate "$rate" --raw --latency-msec=1 --client-name "paloop"
+

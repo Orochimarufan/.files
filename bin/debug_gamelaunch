@@ -1,0 +1,14 @@
+#!/bin/zsh
+# Use "debug_gamelaunch %command%" in Steam SET LAUNCH OPTIONS
+
+GAME_ARGV=("$@")
+GAME_PATH="$1"
+shift
+GAME_ARGS=("$@")
+
+echo -e "\033[33mGame path: $GAME_PATH\nGame arguments: $GAME_ARGS\nSee variables \$GAME_ARGV \$GAME_PATH \$GAME_ARGS\033[0m"
+
+export GAME_ARGV GAME_PATH GAME_ARGS
+export PROMPT="steam:%d> "
+exec /bin/zsh -i
+
