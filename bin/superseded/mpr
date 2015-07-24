@@ -1,0 +1,37 @@
+#!/bin/sh
+# connect to the mpd httpd and open ncmpcpp
+# Requirements: vlc, mpc, ncmpcpp
+# Use MPD_HOST, MPD_PORT, MPD_HTTP_SINK, MPD_HTTP_PORT environment variables instead of arguments
+
+: ${MPD_HOST:=127.0.0.1} ${MPD_PORT:=6600}
+: ${MPD_HTTP_SINK:=1} ${MPD_HTTP_PORT:=8080}
+
+export MPD_HOST
+export MPD_PORT
+
+# Find programs
+mpc=`which mpc 2>/dev/null`
+vlc=`which vlc 2>/dev/null`
+client=`which ncmpcpp 2>/dev/null || which ncmpc 2>/dev/null`
+
+if [ -z "$mpc" ]; then
+	echo "ERROR: mpc (MusicPlayerClient) not found on the system"
+elif [ -z "$vlc" ]; then
+	echo "ERROR: VLC is required for local stream playback"
+elif [ -z "$client" ]; then
+	echo "ERROR: No MPD client installed (ncmpcpp or ncmpc)"
+else
+	# Enable Stream
+	mpc enable $MPC_HTTP_SINK
+
+    # Play Stream (have vlc on fd:3)
+	vlc --repeat http://$MPD_HOST:$MPD_HTTP_PORT/mpd.ogg -I dummy 2>/dev/null &
+	vlc_pid=$!
+
+	# Launch client in pty
+	"$client" -h $MPD_HOST -p $MPD_PORT
+
+	# Stop stream playback
+	kill $vlc_pid
+fi
+

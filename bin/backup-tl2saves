@@ -1,0 +1,23 @@
+#!/bin/zsh
+# Back-up Torchlight II savegames
+
+# Path to steam library
+STEAM_APPS=/media/Data/SteamLibrary/SteamApps
+# Steam User ID to save, use * to backup all saves
+STEAM_USER=*
+# Path to create backups at
+BACKUP_DIR=~/.backup/TL2
+
+# TL2 paths
+TL2_FOLDER="common/Torchlight II"
+SAV_FOLDER="my games/runic games/torchlight 2"
+
+source $DOTFILES/lib/libzsh-utils.zsh
+cd "$STEAM_APPS/$TL2_FOLDER/$SAV_FOLDER"
+
+filename="tl2saves_`date +%Y-%m-%d_%H-%M`.tar.xz"
+msg "Backing up Torchlight II Saves as $filename (in $BACKUP_DIR)"
+[ -e "$BACKUP_DIR" ] || mkdir -p "$BACKUP_DIR"
+color 36 tar -cJvf "$BACKUP_DIR/$filename" {,mod}save/${^~STEAM_USER}
+msg "Done!"
+

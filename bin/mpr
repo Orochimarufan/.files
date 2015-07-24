@@ -1,0 +1,170 @@
+#!/usr/bin/python
+# Use ncmpcpp to play and control a mpd-httpd stream while still being able to control the local volume
+# (c) 2015 Taeyeon Mori
+# requires Python 3.4 or higher
+
+import os
+import sys
+import pty
+import tty
+import stat
+import array
+import fcntl
+import signal
+import asyncio
+import termios
+import argparse
+import contextlib
+import subprocess
+import concurrent.futures
+
+URL_TEMPLATE = "http://{host}:{http_port}/"
+
+
+# ASYNCIO HACKS ==================================================================================
+# asyncio is following a great rationale, but at this point in time, there are still some things
+# missing from it to make it truly useful. Here comes one of 'em:
+@asyncio.coroutine
+def async_stdio(loop=None):
+    # get streams for the standard I/O (stdin and stdout)
+    if not os.path.sameopenfile(0, 1):
+        raise RuntimeError("The async_stdio hack only works when both STDIN and STDOUT point to the same TTY/PTS")
+
+    if loop is None:
+        loop = asyncio.get_event_loop()
+
+    reader = asyncio.StreamReader()
+    reader_protocol = asyncio.StreamReaderProtocol(reader)
+
+    writer_transport, writer_protocol = yield from loop.connect_write_pipe(asyncio.streams.FlowControlMixin, os.fdopen(0, 'wb'))
+    writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, loop)
+
+    yield from loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
+
+    return reader, writer
+
+
+@asyncio.coroutine
+def async_pty(pty, loop=None):
+    # same as above, just with a pty descriptor instead of STD*
+    if loop is None:
+        loop = asyncio.get_event_loop()
+
+    reader = asyncio.StreamReader()
+    reader_protocol = asyncio.StreamReaderProtocol(reader)
+
+    writer_transport, writer_protocol = yield from loop.connect_write_pipe(asyncio.streams.FlowControlMixin, os.fdopen(pty, 'wb'))
+    writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, loop)
+
+    yield from loop.connect_read_pipe(lambda: reader_protocol, os.fdopen(pty))
+
+    return reader, writer
+# END ASYNCIO HACKS ==============================================================================
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(prog=argv[0], add_help=False)
+    parser.add_argument("--help", action="store_true")
+    parser.add_argument("-h", "--host", default=os.environ.get("MPD_HOST", "localhost"))
+    parser.add_argument("-p", "--port", default=os.environ.get("MPD_PORT", "6600"))
+    parser.add_argument("-P", "--http-port", default="8000")
+    parser.add_argument("-E", "--http-output", default="1")
+    args = parser.parse_args(argv[1:])
+    if args.help:
+        parser.print_help()
+        sys.exit(0)
+    return args
+
+
+@asyncio.coroutine
+def main_coro(args, loop):
+    # Enable stream
+    subprocess.check_call(["mpc", "-h", args.host, "-p", args.port, "enable", args.http_output])
+
+    # Manage stdio
+    std_reader, std_writer = yield from async_stdio()
+
+    # Manage vlc
+    vlc_proc = yield from asyncio.create_subprocess_exec("vlc", "--repeat", URL_TEMPLATE.format(**vars(args)), "-I", "rc", stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    vlc_writer = vlc_proc.stdin
+
+    # Manage pty
+    ptm, pts = pty.openpty()
+    loop.add_signal_handler(signal.SIGWINCH, propagate_winsize, ptm)
+    propagate_winsize(ptm)
+
+    # Manage ncmpc
+    ptm_reader, ptm_writer = yield from async_pty(ptm)
+    pty_proc = yield from asyncio.create_subprocess_exec("ncmpcpp", "-h", args.host, "-p", args.port, stdin=pts, stdout=pts, stderr=pts, start_new_session=True, preexec_fn=reopen_tty)
+
+    # Magic
+    input_task = asyncio.async(process_input(std_reader, ptm_writer, vlc_writer))
+    output_task = asyncio.async(process_output(ptm_reader, std_writer))
+    yield from asyncio.wait([input_task, output_task, pty_proc.wait()], return_when=concurrent.futures.FIRST_COMPLETED)
+
+    # Cleanup
+    if pty_proc.returncode is None:
+        pty_proc.terminate()
+    vlc_proc.terminate()
+
+    yield from asyncio.wait([input_task, output_task], timeout=1)
+
+    loop.remove_signal_handler(signal.SIGWINCH)
+    os.close(ptm)
+
+
+def propagate_winsize(fd):
+    # Notify pty of window size
+    buf = array.array('h', [0, 0, 0, 0])
+    fcntl.ioctl(1, termios.TIOCGWINSZ, buf, True)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, buf)
+
+
+def reopen_tty():
+    # reopen tty to make it the controlling tty (see stdlib pty)
+    open(os.ttyname(1), "wb").close()
+
+
+@asyncio.coroutine
+def process_input(reader, writer, vlc_writer):
+    reader_fd = reader._transport.get_extra_info("pipe").fileno()
+    if True: # placeholder for eventual context manager for termio reset
+        tty.setraw(reader_fd)
+        while True:
+            data = yield from reader.read(512)
+            if not data:
+                break
+            elif data == b'+':
+                vlc_writer.write(b"volup 2\n")
+                yield from vlc_writer.drain()
+            elif data == b'-':
+                vlc_writer.write(b"voldown 2\n")
+                yield from vlc_writer.drain()
+            #elif data == b'\x03': # CTRL-C, RAW mode
+            #    raise KeyboardInterrupt()
+            else:
+                writer.write(data)
+                yield from writer.drain()
+
+
+@asyncio.coroutine
+def process_output(reader, writer):
+    while True:
+        data = yield from reader.read(256)
+        if data:
+            writer.write(data)
+            yield from writer.drain()
+        else:
+            break
+
+
+if __name__ == "__main__":
+    args = parse_args(sys.argv)
+    loop = asyncio.get_event_loop()
+
+    mode = termios.tcgetattr(0)
+    try:
+        sys.exit(loop.run_until_complete(main_coro(args, loop)))
+    finally:
+        termios.tcsetattr(0, termios.TCSADRAIN, mode)
+

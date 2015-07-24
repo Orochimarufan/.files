@@ -19,7 +19,7 @@ test -d "$build" || mkdir -p "$build" || exit 1
 # Parse commandline: anything prefixed with - is a makepkg option
 packages=()
 flags=()
-aur_get=aur_get_old # new one not working yet
+aur_get=aur_get_aur4 # new one not working yet
 DL_ONLY=false
 
 for cx in "$@"; do
@@ -42,6 +42,7 @@ for cx in "$@"; do
       echo "Useful makepkg options:"
       echo "  -i            Install package after building it"
       echo "  -s            Install dependencies from official repos"
+      exit 0
       ;;
     -*)
       makepkg_flags=("${makepkg_flags[@]}" "$cx");;
