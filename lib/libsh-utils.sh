@@ -19,11 +19,3 @@ color() {
     return $res
 }
 
-# Append to array
-push() {
-    local arr="$1"; shift
-
-    for val in "$@"; do
-        eval "$arr[\${#$arr[@]}]=\"\$val\""
-    done
-}
