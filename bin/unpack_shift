@@ -1,0 +1,83 @@
+#!/bin/zsh -e
+# (c) 2015 Taeyeon Mori
+
+source "$DOTFILES/lib/libzsh-utils.zsh"
+
+function usage {
+    echo "Usage: $1 [--help] [--notest] [7z options] <archive...> [destination]"
+    echo "unpack_shift (c) 2015 Taeyeon Mori"
+    echo
+    echo "Simple tool to unpack SHIFT-JIS encoded archives onto UTF-8 filesystems"
+    echo "Requires p7zip (the 7z command) and convmv to be available"
+    echo
+    echo "Positional Arguments:"
+    echo "  archive     The archive file (can be given multiple times)"
+    echo "  destination The destination directory to unpack into"
+    echo
+    echo "Options:"
+    echo "  --help      Show this help message and exit"
+    echo "  --test      Do a test-run"
+    echo "  -*          Pass any other options to 7z"
+    exit $2
+}
+
+args=()
+sevenzip_args=()
+convmv_args=(-f shift-jis -t utf8)
+test_run=false
+
+for cx in "$@"; do
+    case "$cx" in
+        --help)
+            usage "$0" 0;;
+        --test)
+            test_run=true;;
+        -*)
+            sevenzip_args+=("$cx");;
+        *)
+            args+=("$cx");;
+    esac
+done
+
+last_arg_ix=$[${#args}] # NOTE: ZSH Arrays start at 1!
+if [ $last_arg_ix -ge 1 ]; then
+    destination="${args[$last_arg_ix]}"
+    if [ ! -f "$destination" ]; then
+        args[$last_arg_ix]=()
+    else
+        destination="`pwd`"
+    fi
+fi
+
+if [ -z "$args" ]; then
+    usage "$0" 1
+fi
+
+$test_run || \
+    convmv_args+=("--notest")
+
+destination="`realpath "$destination"`"
+
+# Make temp dir to not impact other files
+if [ -d "$destination" ]; then
+    tmp="`mktemp -dp "$destination" .unpack_shift_XXXX`"
+else
+    tmp="`mktemp --tmpdir -d unpack_shift_XXXX`"
+fi
+cd "$tmp"
+
+msg "Unpacking Archive(s)..."
+for archive in "${args[@]}"; do
+    msg "  Unpacking $archive"
+    LANG=ja_JP 7z x "${sevenzip_args[@]}" "$archive"
+done
+
+msg "Fixing Filename encodings..."
+convmv "${convmv_args[@]}" -r *
+
+# Clean up temporary dir
+$test_run || \
+    mv * "$destination"
+cd "$destination"
+rm -rf "$tmp"
+
