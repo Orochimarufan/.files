@@ -1,0 +1,10 @@
+#!/bin/sh
+
+trackpoint_dev="TPPS/2 IBM TrackPoint"
+
+if xinput --list --name-only | grep -q "$trackpoint_dev"; then
+    xinput set-prop "$trackpoint_dev" "Evdev Wheel Emulation" 1
+    xinput set-prop "$trackpoint_dev" "Evdev Wheel Emulation Button" 2
+    xinput set-prop "$trackpoint_dev" "Evdev Wheel Emulation Timeout" 200
+fi
+
