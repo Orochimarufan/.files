@@ -1,0 +1,155 @@
+#!/usr/bin/python3
+from __future__ import print_function
+
+import string
+import datetime
+
+class Time:
+    def __init__(self, secs, mins=0, hours=0, days=0):
+        self.secs = secs
+        self.mins = secs // 60 + mins
+        self.secs %= 60
+        self.hours = self.mins // 60 + hours
+        self.mins %= 60
+        self.days = self.hours // 24 + days
+        self.hours %= 24
+    
+    def epoch(self):
+        return self.secs + (self.mins + (self.hours + self.days * 24) * 60) * 60
+    
+    def __str__(self):
+        s = "%02i:%02i" % (self.mins, self.secs)
+        if self.hours > 0:
+            s = "%02i:%s" % (self.hours, s)
+        if self.days > 0:
+            s = "%id %s" % (self.days, s)
+        return s
+
+    def __isub__(self, n):
+        if isinstance(n, Time):
+            self.secs -= n.secs
+            self.mins -= n.mins
+            self.hours -= n.hours
+            self.days -= n.days
+        else:
+            self.secs -= n
+        while self.secs < 0:
+            self.secs += 60
+            self.mins -= 1
+        while self.mins < 0:
+            self.mins += 60
+            self.hours -= 1
+        while self.hours < 0:
+            self.hours += 24
+            self.days -= 1
+    
+    def dec(self):
+        if self.secs > 0:
+            self.secs -= 1
+        else:
+            self.secs += 59
+            if self.mins > 0:
+                self.mins -= 1
+            else:
+                self.mins += 59
+                if self.hours > 0:
+                    self.hours -= 1
+                else:
+                    self.hours += 23
+                    self.days -= 1
+
+    def positive(self):
+        return self.secs > 0 or self.mins > 0 or self.hours > 0 or self.days > 0
+    
+    @staticmethod
+    def parse(s):
+        secs = 0
+        this = ""
+        for c in s:
+            if c in string.digits:
+                this += c
+            elif c in string.whitespace:
+                continue
+            else:
+                it = int(this)
+                if c == "d":
+                    it *= 24
+                if c in "dh":
+                    it *= 60
+                if c in "dhm":
+                    it *= 60
+                if c in "dhms":
+                    secs += it
+                else:
+                    raise ValueError("Unknown time unit: %s, Valid: _d_ays, _h_ours, _m_inutes, _s_econds. s at the end can be omitted." % c)
+                this = ""
+        if this:
+            secs += int(this)
+        return secs
+
+    @classmethod
+    def until(cls, time):
+        error = ValueError("--until format: <hour>:<minute>[:<second>][+<days>]")
+        parts = time.rsplit("+", 1)
+        if len(parts) > 2:
+            raise error
+        elif len(parts) < 2:
+            time, dayoffset = parts[0], 0
+        else:
+            time, dayoffset = parts[0], int(parts[1])
+        parts = time.split(":")
+        if len(parts) < 2 or len(parts) > 3:
+            raise error
+        else:
+            date = datetime.date.today() + datetime.timedelta(days=dayoffset)
+            time = datetime.time(*map(int, parts))
+            comp = datetime.datetime.combine(date, time)
+            diff = comp - datetime.datetime.now()
+            return diff.total_seconds()
+
+
+import argparse
+import os
+import time
+import shlex
+
+def main(argv):
+    parser = argparse.ArgumentParser(prog=argv[0], usage="Sleep with visual feedback, Time arguments will get summed")
+    parser.add_argument("time", help="Time to sleep in seconds, or with units (d,h,m,s)", nargs="?", default=0)
+    parser.add_argument("--mins", "--minutes", help="Time to sleep in minutes", default=0, type=int)
+    parser.add_argument("--hours", help="Time to sleep in hours", default=0, type=int)
+    parser.add_argument("--days", help="Time to sleep in days", default=0, type=int)
+    parser.add_argument("--until", help="Sleep until: '<hour>:<minute>[:<second>][+<dayoffset>]'.")
+    parser.add_argument("--exec", help="Execute command", dest="exec_")
+    args = parser.parse_args(argv[1:])
+
+    if (args.time == args.mins == args.hours == args.days == 0 and args.until is None):
+        raise SystemExit("You need to specify at least one time argument! (Try --help)")
+
+    if args.until is not None:
+        secs = Time.until(args.until)
+    else:
+        secs = 0
+
+    if args.time != 0:
+        secs += Time.parse(args.time)
+
+    visualsleep(Time(secs, args.mins, args.hours, args.days))
+
+    if args.exec_:
+        argv = shlex.split(args.exec_)
+        print("Executing: %s" % args.exec_)
+        os.execvp(argv[0], argv)
+
+def visualsleep(t):
+    copyoft = Time(t.epoch())
+    while t.positive():
+        print("Sleep %10s" % t, end="\r")
+        time.sleep(1)
+        t.dec()
+    print("Slept %10s" % copyoft)
+
+if __name__ == "__main__":
+    import sys
+    main(sys.argv)
+
