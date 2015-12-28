@@ -1,0 +1,120 @@
+#!/usr/bin/python
+# Use Steam with external HDDs
+# (c) 2015 Taeyeon Mori CC-BY-SA
+
+import sys
+import os
+import argparse
+import posixpath
+import ntpath
+
+import vdfparser
+
+
+CONFIG = os.path.expanduser("~/.files/etc/prepare_steam.vdf")
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(prog=argv[0])
+    parser.add_argument("-p", "--platform", "--profile", default=sys.platform, help="Platform profile (%(default)s)")
+    parser.add_argument("--config", default=CONFIG, help="Use alternate config file")
+    return parser.parse_args(argv[1:])
+
+
+def take_sorted_list(dct, pred):
+    keys = list(filter(pred, dct.keys()))
+    lst = [dct[k] for k in sorted(keys)]
+    for k in keys:
+        del dct[k]
+    return lst
+
+
+def detect_steam_platformpath(steamroot):
+    if os.path.exists(os.path.join(steamroot, "Steam.exe")):
+        return ntpath
+    else:
+        return posixpath
+
+
+def main(argv):
+    args = parse_args(argv)
+    
+    vdf = vdfparser.VdfParser()
+    
+    with open(args.config) as f:
+        config = vdf.parse(f)
+    
+    profile = config[args.platform]
+    steamroot = os.path.expanduser(profile["steamroot"])
+    
+    # Read steam libraryfolders.vdf
+    libsvdf = os.path.join(steamroot, "steamapps", "libraryfolders.vdf")
+    
+    with open(libsvdf) as f:
+        libs_config = vdf.parse(f)
+    
+    library_folders = take_sorted_list(libs_config["LibraryFolders"], str.isdigit)
+    
+    # Read steam config.vdf
+    steamvdf = os.path.join(steamroot, "config", "config.vdf")
+
+    with open(steamvdf) as f:
+        steam_config = vdf.parse(f)
+
+    client_config = steam_config["InstallConfigStore"]["Software"]["Valve"]["Steam"]
+    
+    take_sorted_list(client_config, lambda k: k.startswith("BaseInstallFolder_"))
+
+    # Fix Library Folders
+    steampath = detect_steam_platformpath(steamroot)
+    do_normpath = profile.get("SanitizeLibraryPaths", "1") != "0"
+    
+    if do_normpath:
+        orig_library_folders = library_folders
+        library_folders = []
+
+        for f in orig_library_folders:
+            f = steampath.normpath(f)
+            if f not in library_folders:
+                library_folders.append(f)
+
+    for path, steam_path in profile.get("Libraries", {}).items():
+        if not steampath:
+            steam_path = path
+
+        if do_normpath:
+            steam_path = steampath.normpath(steam_path)
+
+        if os.path.exists(path):
+            if steam_path not in library_folders:
+                library_folders.append(steam_path)
+                print ("Added Library Folder at %s%s" % (path, (" (%s)" % steam_path) if steam_path != path else ""))
+        elif steam_path in library_folders:
+            print ("Removing unavailable Library Folder %s" % steam_path)
+            library_folders.remove(steam_path)
+    
+    for path in profile.get("LibraryBlacklist", {}).values():
+        if path in library_folders:
+            print ("Removing blacklisted Library Folder %s" % path)
+            library_folders.remove(path)
+
+    for i, path in enumerate(library_folders):
+        libs_config["LibraryFolders"][str(i + 1)] = path
+        client_config["BaseInstallFolder_%i" % (i + 1)] = path
+
+    print("Available Libraries: %s" % ("\"%s\"" % "\", \"".join(library_folders)) if library_folders else "(none)")
+
+    # Save new vdfs
+    os.rename(libsvdf, libsvdf + ".bak")
+    with open(libsvdf, "w") as f:
+        vdf.write(f, libs_config)
+
+    os.rename(steamvdf, steamvdf + ".bak")
+    with open(steamvdf, "w") as f:
+        vdf.write(f, steam_config)
+    
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -1,0 +1,38 @@
+// prepare_steam config file
+// In Valve VDF format
+// Top-level keys are platform profiles (-p/--platform/--profile)
+"linux"
+{
+    // Steam Install path
+    "steamroot" "~/.local/share/Steam/"
+    // Allow prepare_steam to sanitize library paths?
+    //"SanitizeLibraryPaths" "1"
+    // Libraries that prepare_steam should manage
+    "Libraries"
+    {
+        // "Actual Path" "Path to tell Steam"
+        // The latter may be empty, in which case the former is used
+        "/media/Data/SteamLibrary" ""
+        "/media/DumpStore/Steam/Library" ""
+    }
+    // Library folders that shouldn't be used by this profile
+    "LibraryBlacklist"
+    {
+        // "whatever" "Path Steam shouldn't use"
+        // The former value doesn't matter, must however be unique
+        "0" "/media/DumpStore/Steam/Windows Library"
+    }
+}
+"wine32"
+{
+    "steamroot" "~/.local/share/wineprefixes/Steam32/drive_c/Program Files/Steam/"
+    "Libraries"
+    {
+        "/media/Data/SteamLibrary" "E:\\SteamLibrary"
+        "/media/DumpStore/Steam/Windows Library" "F:\\Steam\\Windows Library"
+    }
+    "LibraryBlacklist"
+    {
+        "0" "F:\\Steam\\Library"
+    }
+}
