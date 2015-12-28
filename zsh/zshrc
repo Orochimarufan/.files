@@ -22,12 +22,15 @@ function gupf {
     set -e
     local ORIGIN=${1-origin}
     local UPSTREAM=${2-upstream}
+    local LBRANCH=`git symbolic-ref --short HEAD`
+    local OBRANCH=${3-$LBRANCH}
+    local UBRANCH=${4-$OBRANCH}
     git fetch $ORIGIN
     git fetch $UPSTREAM
-    git checkout $ORIGIN/master
+    git checkout $ORIGIN/$OBRANCH
     git checkout -b merge
-    git merge $UPSTREAM/master -m "merge upstream from `git ls-remote --get-url $UPSTREAM`"
-    git checkout master
+    git merge $UPSTREAM/$UBRANCH -m "merge upstream from `git ls-remote --get-url $UPSTREAM`"
+    git checkout $LBRANCH
     git rebase merge
     git branch -d merge
     )
