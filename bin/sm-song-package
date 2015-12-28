@@ -1,0 +1,109 @@
+#!/usr/bin/python3
+# StepMania 5 Song package generator
+# (c) 2015 Taeyeon Mori
+#
+# This program tries to create a .smzip ready to drop into SM5/Packages from downloaded .zips containing songs
+
+import zipfile
+import os
+import tempfile
+import posixpath
+
+
+def zip_has_file(f, filename):
+    try:
+        f.getinfo(filename)
+    except KeyError:
+        return False
+    return True
+
+
+def colorful(text, color):
+    return "\033[%sm%s\033[0m" % (color, text)
+
+
+def run(filename, *, delete_orig=False, replace=False, rename_bak=False):
+    with zipfile.ZipFile(filename) as f:
+        if zip_has_file(f, "Songs/"):
+            print("==> '%s' already a valid StepMania song package" % colorful(filename, 36))
+            return True
+        
+        else:
+            print("==> '%s' is not a valid StepMania song package" % colorful(filename, 36))
+            
+            if any((
+                zip_has_file(f, "Announcers/"),
+                zip_has_file(f, "Characters/"),
+                zip_has_file(f, "Data/"),
+                zip_has_file(f, "Noteskins/"),
+                zip_has_file(f, "Themes/"))):
+                print("===> However, it seems to be a different type of SM Package.")
+                return False
+        
+        if replace:
+            newname = filename
+            oldname = ".".join(filename, "bak")
+            os.rename(filename, oldname)
+            
+            print("===> Original was renamed to '%s'" % colorful(oldname, 35))
+        else:
+            newname = ".".join((os.path.splitext(filename)[0], "smzip"))
+        
+            if newname == filename:
+                newname = ".".join((os.path.splitext(filename)[0], "new", "smzip"))
+                
+            oldname = filename
+        
+        if os.path.exists(newname):
+            print("===> Target filename exists: '%s'" % colorful(newname, 35))
+            return False
+        
+        print("===> Repacking into StepMania Package: '%s'" % colorful(newname, 35))
+        with tempfile.TemporaryDirectory() as tmp:
+            with zipfile.ZipFile(newname, "w", zipfile.ZIP_DEFLATE) as out:
+                
+                dirs = []
+                for info in f.infolist():
+                    print("\r====> Processing '%s'" % colorful(info.filename, 32), end="\033[0K")
+                    file = f.extract(info, path=tmp)
+                    out.write(file, posixpath.join("Songs", info.filename))
+                    if os.path.isfile(file):
+                        os.unlink(file)
+                    else:
+                        dirs.append(file)
+                
+                for directory in reversed(dirs):
+                    os.rmdir(directory)
+        print("\r\033[2K", end="")
+        
+        if delete_orig:
+            print("===> Deleting Original Archive.")
+            os.unlink(oldname)
+        elif rename_bak and not replace:
+            xoldname = ".".join((oldname, "bak"))
+            os.rename(oldname, xoldname)
+            
+            print("===> Original was renamed to '%s'" % colorful(xoldname, 35))
+
+        print("===> Done.")
+        return True
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-delete", action="store_true", help="Delete original files")
+    parser.add_argument("-replace", action="store_true", help="Use the original filename for the new archive and add .bak to the original one")
+    parser.add_argument("-rename", action="store_true", help="Rename original files to *.bak")
+    parser.add_argument("files", nargs="+", help="The files to process")
+    
+    args = parser.parse_args()
+    
+    print("=> Running sm-song-package")
+    print("=> (c) 2015 Taeyeon Mori")
+    
+    for file in args.files:
+        run(file, delete_orig=args.delete, replace=args.replace, rename_bak=args.rename)
+    
+    print("=> Done.")

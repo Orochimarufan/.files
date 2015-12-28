@@ -1,0 +1,66 @@
+#!/usr/bin/python
+# Sleep Timer for Aufio Books, inspired by some of the nice Android audiobook players
+# (c) 2015 by Taeyeon Mori
+
+
+from PyQt5 import QtCore, QtGui, QtWidgets, QtMultimedia
+
+import sys
+import subprocess
+
+
+cmd = ["audacious", "--pause"]
+beep = "/usr/share/sounds/freedesktop/stereo/complete.oga"
+
+
+def run_task():
+    print("Rnunning ", cmd)
+    subprocess.check_call(cmd)
+
+
+
+def main(app):
+    icon = QtGui.QIcon.fromTheme("caffeine", QtGui.QIcon.fromTheme("kalarm"))
+    tray = QtWidgets.QSystemTrayIcon(icon)
+
+    def wakeup():
+        print("Checking Human")
+        dialog = QtWidgets.QMessageBox(QtWidgets.QMessageBox.NoIcon, "Wake up", "Click OK or press return to reset timer")
+        dialog.addButton(QtWidgets.QMessageBox.Ok)
+        dialog.addButton(QtWidgets.QMessageBox.Close)
+        timeout = QtCore.QTimer()
+        timeout.setInterval(60000)
+        timeout.setSingleShot(True)
+        timeout.timeout.connect(dialog.reject)
+
+        QtMultimedia.QSound.play(beep)
+
+        timeout.start()
+        if dialog.exec() != QtWidgets.QMessageBox.Ok:
+            timeout.stop()
+            run_task()
+            app.quit()
+        else:
+            timer.start()
+
+    timer = QtCore.QTimer()
+    timer.setInterval(600000)
+    timer.setSingleShot(True)
+    timer.timeout.connect(wakeup)
+
+    menu = QtWidgets.QMenu()
+    areset = menu.addAction("Reset")
+    areset.triggered.connect(lambda x: (timer.stop(), timer.start()))
+    aquit = menu.addAction("Quit")
+    aquit.triggered.connect(app.quit)
+    tray.setContextMenu(menu)
+
+    tray.show()
+    timer.start()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    app = QtWidgets.QApplication(sys.argv)
+    sys.exit(main(app))
+
