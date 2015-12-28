@@ -27,11 +27,19 @@ Notable ones are:
 - aconvert  : Pre-advancedav version of xconv. Has profiles for extracting audio.
 - ffpsp\*   : Scripts to run HandBrakeCLI to convert videos for use with Sony's PSP.
 - pulse-\*  : Tools to be used with my pulse configuration in .files/config/pulse
+- paloop    : Loop a pulseaudio source to a sink
 - aur.sh    : More powerfull version of the popular aur.sh script.
 - schedshut : Shutdown when a specific task/process finishes.
 - mountpart : Mount a partition in a whole-disk imagefile.
 - argshell  : call the same application repeatedly, with a common set of arguments.
 - fix-steam-runtime.sh : Fix Steam runtime on Arch Linux (And others with "too new" libstdc++ and friends)
+- prepare\_steam : Manage Steam Library Folders on Removable Storage
+- sm-song-package : Simplify creation of SM5-compliant song packages
+- unpack\_shift : Unpack SHIFT-JIS archives
+- stayawake : Pause music player when one falls asleep
+- lns       : Make symbolic links without thinking about relative paths too hard
+- visualsleep : A sleep utility with visual feedback
+
 
 .files/etc
 ----------
@@ -40,6 +48,7 @@ Contains configuration for those utilities
 Currently contains:
 - aur.conf  : Configuration for aur.sh
 - user-info : The user information entered at install time, in shell-readable form
+- prepare\_steam.vdf : Config file for prepare\_steam
 
 .files/lib
 ----------
@@ -53,6 +62,7 @@ Currently, that entails:
 
 As well as some python modules:
 - advancedav.py     : A very overengineered way to construct complex ffmpeg commandlines
+- vdfparser.py      : A simple parser for Valve's VDF Key/Value format
 
 .files/git
 ----------
