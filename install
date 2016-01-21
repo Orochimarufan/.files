@@ -102,6 +102,11 @@ generate "$HOME/.gitconfig" <<EOF
     path = $(relpath "$GIT" "$HOME")/user-info
 EOF
 
+[ "`uname -s`" = "Darwin" ] && \
+cat >>"$HOME/.gitconfig" <<EOF
+    path = $(relpath "$GIT" "$HOME")/osx
+EOF
+
 generate "$GIT/user-info" <<EOF
 [user]
     name = $REALNAME
@@ -129,7 +134,7 @@ if echo $SHELL | grep -q zsh; then
     msg "Login shell is already set to zsh, you're good to go!"
 else
     msg "Setting login shell to '/bin/zsh'..."
-    chsh -s /bin/zsh
+    chsh -s "`which zsh`"
     warn echo "You need to relog to apply shell configuration."
 fi
 
