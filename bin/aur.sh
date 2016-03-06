@@ -2,13 +2,19 @@
 # (c) 2014-2015 Taeyeon Mori
 # vim: ft=sh:ts=2:sw=2:et
 
+AUR_DEFAULT_HOST="https://aur.archlinux.org/"
+
 # Load libraries and configuraion
 source "$DOTFILES/lib/libzsh-utils.zsh"
 source "$DOTFILES/etc/aur.conf"
 
 function throw {
   err "$2"
-  exit $1
+  clean_exit $1
+}
+
+function clean_exit {
+  exit ${1-0}
 }
 
 
@@ -20,7 +26,7 @@ makepkg_args=()
 aur_get=aur_get_aur4
 DL_ONLY=false
 ASK=false
-AUR_HOST="https://aur.archlinux.org/"
+AUR_HOST="$AUR_DEFAULT_HOST"
 ADD_UPDATES=false
 RECURSE_DEPS=false
 NEED_COWER=false
@@ -89,6 +95,7 @@ process_arg() {
       echo "                Use a different AUR server. default: https://aur.archlinux.org/"
       echo "  --old-aur     Use the old (non-git) AUR methods"
       echo "  --ask         Ask before installing packages (removes --noconfirm)"
+      echo "  --clean       Clean up leaftover temporary files (of failed builds) and exit"
       echo
       echo "Useful makepkg options:"
       echo "  -i            Install package after building it"
@@ -99,6 +106,18 @@ process_arg() {
       echo "      However, certain cower-only features are automatically enabled when cower is found."
       exit 0
       ;;
+    --clean)
+      local temp="${TMPDIR-/tmp}"
+      for tmp in `find "$temp" -name 'aur.sh.*'`; do
+        if [ -e "$tmp/aur.sh.running" ] && [ -e "/proc/${tmp%%.}" ]; then
+          err "Cannot remove '$tmp', aur.sh instance seems to be running"
+        else
+          msg "Removing '$tmp'.."
+          rm -rf "$tmp"
+        fi
+      done
+      color 35 echo "Cleaned leftover temporary files."
+      exit 0;;
     # Makepkg args
     --pkg|--key|--config) # These take an additional value
       _proxy_args=1
@@ -124,12 +143,26 @@ for cx in "$@"; do
   esac
 done
 
+# Cower Detection
+USE_COWER=false
+
 if cower --version >/dev/null; then
-  NEED_COWER=true # Auto-enable cower support if installed.
+  USE_COWER=true # Auto-enable cower support if installed.
 elif $NEED_COWER; then
   throw 31 "Options requiring cower have been selected but cower was not found."
 else
-  warn "Could not detect cower on the system. Not all features are available without it."
+  warn "Could not detect cower on the system."
+fi
+
+if [ "$aur_get" != "aur_get_aur4" ] || [ "$AUR_HOST" != "$AUR_DEFAULT_HOST" ]; then
+  USE_COWER=false
+  $NEED_COWER &&
+    throw 31 "--old-aur and --aur-host are currently not supported with cower features" ||
+    warn "Features depending on cower cannot be used with --old-aur and --aur-host. Disabling them."
+fi
+
+if ! $USE_COWER; then
+  warn "Cower will not be used. Not all features are available without it."
   warn "Specifically, split packages cannot be detected without cower."
 fi
 
@@ -162,11 +195,34 @@ aur_get_aur4() {
 # Print some info
 msg "[AUR] AURDIR=$AURDIR; PKGDEST=$PKGDEST"
 
+if $ADD_UPDATES; then
+  [ -n "$packages" ] && throw 31 "You cannot specify package names when using --update"
+  OFS="$IFS"
+  IFS=$'\n'
+  for update in `cower -u`; do
+    packages=("${packages[@]}" "`echo $update | cut -d' ' -f2`")
+  done
+  IFS="$OFS"
+fi
+
+if [ -z "$packages" ]; then
+  warn "[AUR] Nothing to do."
+  exit 0
+fi
+
 # Figure out build directory
 if ! $DL_ONLY && ! $LIST_ONLY; then
   tmpbuild=${TMPDIR-/tmp}/aur.sh.$$
   build="${BUILDDIR:-$tmpbuild}"
   test -d "$build" || mkdir -p "$build" || throw 1 "Couldn't create build directory"
+
+  clean_exit() {
+    rm "$build/aur.sh.running"
+    exit ${1-0}
+  }
+  trap clean_exit TERM
+  trap clean_exit INT
+  touch "$build/aur.sh.running"
 
   test "$build" = "$PWD" || \
     msg "[AUR] Working in $build."
@@ -180,16 +236,6 @@ if ! $DL_ONLY && ! $LIST_ONLY; then
   fi
 fi
 
-if $ADD_UPDATES; then
-  [ -n "$packages" ] && throw 31 "You cannot specify package names when using --update"
-  OFS="$IFS"
-  IFS=$'\n'
-  for update in `cower -u`; do
-    packages=("${packages[@]}" "`echo $update | cut -d' ' -f1`")
-  done
-  IFS="$OFS"
-fi
-
 
 AFFECTED_PKGS=()
 
@@ -198,7 +244,7 @@ build_package() {
   local p="$1" # package name
   local COWER_INFO="$2"
 
-  if $NEED_COWER; then
+  if $USE_COWER; then
     [ -z "$COWER_INFO" ] && COWER_INFO=`cower -i $p`
 
     info_grep() {
@@ -207,8 +253,8 @@ build_package() {
 
     local PACKBASE=`info_grep PackageBase | sed -e 's/^\s*//' -e 's/\s*$//'`
     if [ -n "$PACKBASE" ]; then
-      color 35 echo "$p: Is a split package. Selecting base package '$PACKBASE' instead."
-      warn "Operations on specific sub-packages require the base package to be specified along with --pkg."
+      color 35 echo "[AUR] $p: Is a split package. Selecting base package '$PACKBASE' instead."
+      warn "[AUR] Operations on specific sub-packages require the base package to be specified along with --pkg."
       build_package "$PACKBASE" "`echo "$COWER_INFO" | grep -v PackageBase`"
       return $?
     fi
@@ -217,7 +263,7 @@ build_package() {
     if $RECURSE_DEPS; then
       for dep in `echo $DEPENDS`; do
         if ! pacman -Qi "$dep" >/dev/null 2>&1 && cower -i "$dep" >/dev/null 2>&1; then # Check if it's an (un-installed) aur package
-          color 35 echo "$p: Building AUR dependency '$dep'..."
+          color 35 echo "[AUR] $p: Building AUR dependency '$dep'..."
           build_package "$dep"
         fi
       done
@@ -273,5 +319,6 @@ if ! $DL_ONLY && ! $LIST_ONLY; then
   [ "$build" = "$tmpbuild" ] && \
     warn "[AUR] Removing temporary directory $tmpbuild" && \
     rm -rf "$tmpbuild"
+  clean_exit
 fi
 
