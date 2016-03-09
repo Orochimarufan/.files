@@ -102,5 +102,8 @@ if [[ ! -d "$TMPPREFIX" ]]; then
   mkdir -p "$TMPPREFIX"
 fi
 
+# Arch Build system
+export ASPROOT=$HOME/aur/ABS/.asp
+
 # Local overrides
 [[ -e "$DOTFILES/zsh/zprofile.local" ]] && source "$DOTFILES/zsh/zprofile.local"
