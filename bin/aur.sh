@@ -31,6 +31,8 @@ ADD_UPDATES=false
 RECURSE_DEPS=false
 NEED_COWER=false
 LIST_ONLY=false
+EXCLUDE=
+ASDEPS=true
 
 add_makepkg_arg() {
   makepkg_args=("${makepkg_args[@]}" "$1")
@@ -49,6 +51,8 @@ process_arg() {
     case "$_next_arg" in
       --aur-host)
         AUR_HOST="$cx";;
+      --exclude)
+        EXCLUDE=",$cx";;
     esac
     _next_arg=
     continue
@@ -63,7 +67,7 @@ process_arg() {
       DL_ONLY=true;;
     --ask)
       ASK=true;;
-    --aur-host) # need more args
+    --aur-host|--exclude) # need more args
       _next_arg="$cx";;
     -u|--update)
       [ -n "$MODE" ] && throw 255 "Can only use one flag from the 'aur.sh command' category"
@@ -96,6 +100,9 @@ process_arg() {
       echo "  --old-aur     Use the old (non-git) AUR methods"
       echo "  --ask         Ask before installing packages (removes --noconfirm)"
       echo "  --clean       Clean up leaftover temporary files (of failed builds) and exit"
+      echo "  --exclude <pkgs>"
+      echo "                Exclude packages from -u"
+      echo "  --asexplicit  Don't pass --asdeps to makepkg"
       echo
       echo "Useful makepkg options:"
       echo "  -i            Install package after building it"
@@ -118,8 +125,10 @@ process_arg() {
       done
       color 35 echo "Cleaned leftover temporary files."
       exit 0;;
+    --asexplicit)
+      ASDEPS=false;;
     # Makepkg args
-    --pkg|--key|--config) # These take an additional value
+    --pkg|--key|--config|-p) # These take an additional value
       _proxy_args=1
       add_makepkg_arg "$cx";;
     -*)
@@ -142,6 +151,7 @@ for cx in "$@"; do
       process_arg "$cx";;
   esac
 done
+
 
 # Cower Detection
 USE_COWER=false
@@ -203,11 +213,19 @@ if $ADD_UPDATES; then
     packages=("${packages[@]}" "`echo $update | cut -d' ' -f2`")
   done
   IFS="$OFS"
+
+  msg "[AUR] Updates available for: ${packages[*]}"
+
+  if [ -n "$EXCLUDE" -o -n "$AURSH_IGNORE_UPDATES" ]; then
+    packages=(`echo ${packages[@]} | sed -re "s/$(echo $EXCLUDE $AURSH_IGNORE_UPDATES | sed -e 's/[ ,]/|/g')//g"`)
+  fi
 fi
 
 if [ -z "$packages" ]; then
   warn "[AUR] Nothing to do."
   exit 0
+else
+  msg "[AUR] Package set: ${packages[*]}"
 fi
 
 # Figure out build directory
@@ -217,7 +235,7 @@ if ! $DL_ONLY && ! $LIST_ONLY; then
   test -d "$build" || mkdir -p "$build" || throw 1 "Couldn't create build directory"
 
   clean_exit() {
-    rm "$build/aur.sh.running"
+    rm "$build/aur.sh.running" 2>/dev/null || true
     exit ${1-0}
   }
   trap clean_exit TERM
@@ -234,6 +252,10 @@ if ! $DL_ONLY && ! $LIST_ONLY; then
 
     add_makepkg_arg "--noconfirm"
   fi
+
+  $ASDEPS && add_makepkg_arg "--asdeps"
+
+  msg "[AUR] Makepkg args: ${makepkg_args[*]}"
 fi
 
 
