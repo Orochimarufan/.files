@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import re
+import shutil
+
+epb_re=re.compile(r'((NC)?(OP|ED)|S[Pp]?|EX)\s*\d+|Special|[Ii]ntroduction')
+epc_re=re.compile(r'Hi10|\d+p|\d+x\d+|[Vv]\d+|[\[\(][0-9A-Fa-f]{8}[\)\]]')
+ep_re=re.compile(r'[^\[](?:[Ee][Pp]?)?[_\s]*(\d+)[^\d\]]')
+stuff_re=re.compile(r'\[[^\]]+\]|\([^\)]+\)')
+
+for x in os.listdir():
+    if os.path.isdir(x) and not x.startswith("."):
+        print("Clean", x)
+        shutil.rmtree(x)
+
+
+root=sys.argv[1] if len(sys.argv)>1 else "../Downloads"
+fix = {}
+with open(".library") as f:
+    root = f.readline().strip()
+    for line in f:
+        if "|" in line:
+            k, v = line.rstrip("\n").rsplit("|", 2)
+            fix[k] = v
+
+
+for name in os.listdir(root):
+    dir = os.path.join(root, name)
+    if not os.path.isdir(dir):
+        print("not a directory %s" % dir)
+        continue
+    if name in fix:
+        series_name = fix[name]
+    else:
+        series_name = stuff_re.sub("", name).replace("_", " ").replace(".", " ").strip()
+    print("Series: %s" % series_name)
+    os.mkdir(series_name)
+    for f in sorted(os.scandir(dir), key=lambda x: x.name):
+        if not f.is_file() or f.name.endswith(".part"):
+            continue
+        cn = epc_re.sub("", f.name)
+        m = ep_re.search(cn)
+        if m and not epb_re.search(cn):
+            new_name = "%s - E%s" % (series_name, m.group(1))
+        else:
+            new_name = stuff_re.sub("", os.path.splitext(f.name)[0]).replace("_", " ").strip()
+        print("    %s (from %s)" % (new_name, f.name))
+        os.symlink(os.path.join("..", os.path.relpath(dir), f.name), os.path.join(series_name, new_name + "." + os.path.splitext(f.name)[1]))
+
+

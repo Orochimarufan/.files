@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+# (c) 2015 Taeyeon Mori
+
+from animeimport import transport_path
+
+import argparse
+import os
+import sys
+import errno
+
+
+def resymlink(target, location, dir, dir_fd):
+    try:
+       os.unlink(location, dir_fd=dir_fd)
+    except FileNotFoundError:
+    	pass
+    if os.path.isabs(target):
+        os.symlink(target, location, dir_fd=dir_fd)
+    else:
+        os.symlink(transport_path(target, dir, location), location, dir_fd=dir_fd)
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(prog=argv[0], description="""
+    Move symbolic link targets (Does not move the files, only changes referencing symlinks)
+    """)
+    parser.add_argument("source_anchor", help="Old path")
+    parser.add_argument("target_anchor", help="New path")
+
+    args = parser.parse_args(argv[1:])
+
+    sa_len = len(args.source_anchor)
+
+    for root, dirs, files, root_fd in os.fwalk():
+        print("CHDIR %s" % root)
+        for fname in files:
+            try:
+                target = os.readlink(fname, dir_fd=root_fd)
+            except OSError as e:
+                if e.errno == errno.EINVAL:
+                    continue # not a symlink, don't touch it
+                raise
+            else:
+                if target.startswith(args.source_anchor):
+                    newtarget = args.target_anchor + target[sa_len:]
+                    print("  LINK '%s' => '%s'" % (fname, newtarget))
+                    resymlink(newtarget, fname, root, root_fd)
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+
