@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 # (c) 2014 Taeyeon MORI
 
 import os

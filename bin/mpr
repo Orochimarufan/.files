@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # Use ncmpcpp to play and control a mpd-httpd stream while still being able to control the local volume
 # (c) 2015 Taeyeon Mori
 # requires Python 3.4 or higher

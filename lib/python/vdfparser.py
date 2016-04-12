@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # Parse Steam/Source VDF Files
 # Reference: https://developer.valvesoftware.com/wiki/KeyValues#File_Format
 # (c) 2015 Taeyeon Mori; CC-BY-SA

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # Sleep Timer for Aufio Books, inspired by some of the nice Android audiobook players
 # (c) 2015 by Taeyeon Mori
 

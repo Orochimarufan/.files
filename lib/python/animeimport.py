@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # (c) 2015 Taeyeon Mori <orochimarufan.x3@gmail.com>
 # Anime Import V2-4
 

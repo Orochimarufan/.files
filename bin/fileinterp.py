@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # (c) 2015 Taeyeon Mori
 # execute a python file as if the lines were entered into an interactive prompt
 

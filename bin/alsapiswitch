@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # (c) 2015 Taeyeon Mori
 # Easily toggle the IEC958 In Phase Inverse of an ALSA card
 # Useful for looping back audio from a PS3 through a CMedia card with IEC958-In
