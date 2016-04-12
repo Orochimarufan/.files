@@ -4,9 +4,12 @@
 [push]
     default = simple
 
-[url "git@github.com:"]
-	insteadOf = git://github.com/
-	insteadOf = https://github.com/
+[url "https://github.com/"]
+    insteadOf = git://github.com/
+
+#[url "git@github.com:"]
+#	insteadOf = git://github.com/
+#	insteadOf = https://github.com/
 
 [url "https://aur.archlinux.org/"]
     insteadOf = https://aur4.archlinux.org/

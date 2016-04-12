@@ -58,6 +58,7 @@ fi
 path=(
   $HOME/.local/bin
   $DOTFILES/bin
+  $HOME/junest/bin
   /usr/local/{bin,sbin}
   $path
 )
