@@ -1,3 +1,6 @@
 #!/bin/sh
-/lib/ld-linux-x86-64.so.2 "$1"
+# XXX: only works if .interp is numbered < 10 (readelf output is retarded to parse because of the [<nr>] with space padding)
+INTERP=`readelf -SW "$1" | grep .interp | awk '{print "dd if='$1' of=/proc/self/fd/1 bs=1 count=$[0x" $7 "] skip=$[0x" $6 "]"}' | sh 2>/dev/null`
+
+exec "$INTERP" "$@"
 

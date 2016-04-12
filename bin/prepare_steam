@@ -46,6 +46,10 @@ def main(argv):
     
     profile = config[args.platform]
     steamroot = os.path.expanduser(profile["steamroot"])
+
+    if profile.get("Enabled", "1") != "1":
+        print("Profile disabled in config")
+        return 0
     
     # Read steam libraryfolders.vdf
     libsvdf = os.path.join(steamroot, "steamapps", "libraryfolders.vdf")
@@ -109,10 +113,11 @@ def main(argv):
     with open(libsvdf, "w") as f:
         vdf.write(f, libs_config)
 
-    os.rename(steamvdf, steamvdf + ".bak")
-    with open(steamvdf, "w") as f:
-        vdf.write(f, steam_config)
-    
+    if profile.get("DontTouchConfigVdf", "0") != "1":
+        os.rename(steamvdf, steamvdf + ".bak")
+        with open(steamvdf, "w") as f:
+            vdf.write(f, steam_config)
+
     return 0
 
 

@@ -26,6 +26,7 @@
 "wine32"
 {
     "steamroot" "~/.local/share/wineprefixes/Steam32/drive_c/Program Files/Steam/"
+    "Enabled" "0"
     "Libraries"
     {
         "/media/Data/SteamLibrary" "E:\\SteamLibrary"
