@@ -266,46 +266,53 @@ build_package() {
   local p="$1" # package name
   local COWER_INFO="$2"
 
-  if $USE_COWER; then
-    [ -z "$COWER_INFO" ] && COWER_INFO=`cower -i $p`
+  if [ -e "$CUSTOMDIR/$p" ]; then
+    cd "$CUSTOMDIR"
+    AFFECTED_PKGS=("${AFFECTED_PKGS[@]}" "$p")
+    $LIST_ONLY && return
+    msg "[AUR] Found '$p' in '$CUSTOMDIR', Using that"
+  else
+    if $USE_COWER; then
+      [ -z "$COWER_INFO" ] && COWER_INFO=`cower -i $p`
 
-    info_grep() {
-      echo "$COWER_INFO" | grep "$@" | cut -d: -f2
-    }
+      info_grep() {
+        echo "$COWER_INFO" | grep "$@" | cut -d: -f2
+      }
 
-    local PACKBASE=`info_grep PackageBase | sed -e 's/^\s*//' -e 's/\s*$//'`
-    if [ -n "$PACKBASE" ]; then
-      color 35 echo "[AUR] $p: Is a split package. Selecting base package '$PACKBASE' instead."
-      warn "[AUR] Operations on specific sub-packages require the base package to be specified along with --pkg."
-      build_package "$PACKBASE" "`echo "$COWER_INFO" | grep -v PackageBase`"
-      return $?
+      local PACKBASE=`info_grep PackageBase | sed -e 's/^\s*//' -e 's/\s*$//'`
+      if [ -n "$PACKBASE" ]; then
+        color 35 echo "[AUR] $p: Is a split package. Selecting base package '$PACKBASE' instead."
+        warn "[AUR] Operations on specific sub-packages require the base package to be specified along with --pkg."
+        build_package "$PACKBASE" "`echo "$COWER_INFO" | grep -v PackageBase`"
+        return $?
+      fi
+
+      local DEPENDS=`info_grep -i depends`
+      if $RECURSE_DEPS; then
+        for dep in `echo $DEPENDS`; do
+          if ! pacman -Qi "$dep" >/dev/null 2>&1 && cower -i "$dep" >/dev/null 2>&1; then # Check if it's an (un-installed) aur package
+            color 35 echo "[AUR] $p: Building AUR dependency '$dep'..."
+            build_package "$dep"
+          fi
+        done
+      fi
     fi
 
-    local DEPENDS=`info_grep -i depends`
-    if $RECURSE_DEPS; then
-      for dep in `echo $DEPENDS`; do
-        if ! pacman -Qi "$dep" >/dev/null 2>&1 && cower -i "$dep" >/dev/null 2>&1; then # Check if it's an (un-installed) aur package
-          color 35 echo "[AUR] $p: Building AUR dependency '$dep'..."
-          build_package "$dep"
-        fi
-      done
-    fi
+    AFFECTED_PKGS=("${AFFECTED_PKGS[@]}" "$p")
+
+    $LIST_ONLY && return
+
+    # First, download the PKGBUILD from AUR, to $AURDEST
+    cd "$AURDEST"
+    msg "[AUR] $p: Getting PKGBUILD"
+    {
+      test -d $p && \
+      test -f $p/PKGBUILD && \
+      grep -q "#CUSTOMPKG" $p/PKGBUILD && \
+      warn "[AUR] $p: Found #CUSTOMPKG; not updating PKGBUILD from AUR!" \
+    } || \
+      $aur_get "$p" || throw 2 "[AUR] $p: Couldn't download package"
   fi
-
-  AFFECTED_PKGS=("${AFFECTED_PKGS[@]}" "$p")
-
-  $LIST_ONLY && return
-
-  # First, download the PKGBUILD from AUR, to $AURDEST
-  cd "$AURDEST"
-  msg "[AUR] $p: Getting PKGBUILD"
-  {
-    test -d $p && \
-    test -f $p/PKGBUILD && \
-    grep -q "#CUSTOMPKG" $p/PKGBUILD && \
-    warn "[AUR] $p: Found #CUSTOMPKG; not updating PKGBUILD from AUR!" \
-  } || \
-    $aur_get "$p" || throw 2 "[AUR] $p: Couldn't download package"
 
   $DL_ONLY && return
 
