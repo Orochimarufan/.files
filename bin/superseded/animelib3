@@ -1,52 +1,178 @@
 #!/usr/bin/env python3
+# (c) 2016 Taeyeon Mori
+# Inferior in capabilities to animeimport.py/animelib, but has better default heuristics
+# Needs to be integrated with the former. (Not to mention this is a hackjob >.>)
 
 import os
 import sys
 import re
 import shutil
-
-epb_re=re.compile(r'((NC)?(OP|ED)|S[Pp]?|EX)\s*\d+|Special|[Ii]ntroduction')
-epc_re=re.compile(r'Hi10|\d+p|\d+x\d+|[Vv]\d+|[\[\(][0-9A-Fa-f]{8}[\)\]]')
-ep_re=re.compile(r'[^\[](?:[Ee][Pp]?)?[_\s]*(\d+)[^\d\]]')
-stuff_re=re.compile(r'\[[^\]]+\]|\([^\)]+\)')
-
-for x in os.listdir():
-    if os.path.isdir(x) and not x.startswith("."):
-        print("Clean", x)
-        shutil.rmtree(x)
+import tempfile
+import itertools
+import argparse
 
 
-root=sys.argv[1] if len(sys.argv)>1 else "../Downloads"
+epc_re=re.compile(r'Hi10|10[Bb][Ii][Tt]|\d+p|\d+x\d+|[Vv]\d+|[\[\(][0-9A-Fa-f]{8}[\)\]]|S(eason)?[_\s]*\d+') # Clean out unrelated numbers things
+
+epb_re=re.compile(r'((NC|TV)?(OP|ED)|S(P|p(ecial)?)|EX)[_\s]*\d+|[Ii]ntroduction') # Episode Blacklist
+ep_re=re.compile(r'[^\[](?:[Ee][Pp]?)?[_\s]*[^\d.](\d+)[^\d\].]') # Episode Number
+
+stuff_re=re.compile(r'\[[^\]]+\]|\([^\)]+\)') # Remove all metadata
+esp_re=re.compile(r'S(?:P|p(?:ecial)?)?\s*(\d+)(?!.+\d+)') # Special Number
+
+
+# Functions
+def makeabs(path, anchor):
+    return path if os.path.isabs(path) else os.path.join(anchor if os.path.isabs(anchor) else os.path.abspath(anchor), path)
+
+
+def abslink(link, anchor=None):
+    return os.path.normpath(makeabs(os.readlink(link), anchor if anchor else os.path.dirname(link)))
+
+
+def compute_link_dir_sync(src_dir, dst_dir):
+    src_content = {x.name: x for x in os.scandir(src_dir)}
+    dst_content = {x.name: x for x in os.scandir(dst_dir)}
+
+    ok = set()
+    need_update = set()
+
+    for name, src_file in src_content.items():
+        if name in dst_content:
+            dst_file = dst_content[name]
+
+            if abslink(src_file.path, dst_dir) == abslink(dst_file.path):
+                ok.add(name)
+            else:
+                need_update.add(name)
+
+    need_del = set(dst_content.keys()) - set(src_content.keys())
+
+    return ok, need_update, need_del
+
+
+# Commandline
+parser = argparse.ArgumentParser()
+parser.add_argument("repo", default=None, nargs="?")
+parser.add_argument("--library", default=".library")
+parser.add_argument("-v", action="store_true", dest="verbose")
+args = parser.parse_args()
+
+
+# Load settings
 fix = {}
-with open(".library") as f:
-    root = f.readline().strip()
-    for line in f:
-        if "|" in line:
-            k, v = line.rstrip("\n").rsplit("|", 2)
-            fix[k] = v
+root = os.path.abspath(args.repo or "../Downloads")
+os.chdir(os.path.dirname(args.library))
+
+if os.path.exists(args.library):
+    if args.repo:
+        print("Error: Cannot use 'repo' argument when updating a library (%s)" % args.library)
+        sys.exit(2)
+
+    with open(args.library) as f:
+        root = f.readline().strip()
+        if "=>" in root:
+            root, cwd = root.split("=>", 1)
+            root = os.path.abspath(root)
+            os.chdir(cwd)
+        for line in f:
+            if "|" in line:
+                k, v = line.rstrip("\n").rsplit("|", 2)
+                fix[k] = v
+
+print("Library %s: Using repo at '%s', got %i fixes" % (args.library, root, len(fix)))
 
 
-for name in os.listdir(root):
-    dir = os.path.join(root, name)
-    if not os.path.isdir(dir):
-        print("not a directory %s" % dir)
-        continue
-    if name in fix:
-        series_name = fix[name]
-    else:
-        series_name = stuff_re.sub("", name).replace("_", " ").replace(".", " ").strip()
-    print("Series: %s" % series_name)
-    os.mkdir(series_name)
-    for f in sorted(os.scandir(dir), key=lambda x: x.name):
-        if not f.is_file() or f.name.endswith(".part"):
-            continue
-        cn = epc_re.sub("", f.name)
-        m = ep_re.search(cn)
-        if m and not epb_re.search(cn):
-            new_name = "%s - E%s" % (series_name, m.group(1))
+with tempfile.TemporaryDirectory(prefix=".temp-", dir=os.getcwd()) as temp:
+    print("=== Analyzing Repo ===")
+    # Do work in temporary directory
+    for name in os.listdir(root):
+        path = os.path.join(root, name)
+
+        if os.path.isdir(path):
+            if name in fix:
+                series_name = fix[name]
+            else:
+                series_name = stuff_re.sub("", name).replace("_", " ").replace(".", " ").strip()
+
+            print("Series: %s" % series_name)
+
+            os.mkdir(os.path.join(temp, series_name))
+
+            for f in sorted(os.scandir(path), key=lambda x: x.name):
+                if not f.is_file() or f.name.endswith(".part"):
+                    continue
+
+                cn = epc_re.sub("", f.name)
+
+                m = ep_re.search(cn)
+                if m and not epb_re.search(cn):
+                    new_name = "%s - E%s" % (series_name, m.group(1))
+                else:
+                    cn = stuff_re.sub("", os.path.splitext(f.name)[0]).replace("_", " ").replace(".", " ").strip()
+                    m = esp_re.search(cn)
+                    if m:
+                        new_name = "%s - S%s" % (series_name, m.group(1))
+                    else:
+                        new_name = cn
+
+                if args.verbose:
+                    print("    %s (from %s)" % (new_name, f.name))
+                os.symlink(os.path.join("..", os.path.relpath(path), f.name), os.path.join(temp, series_name, new_name + os.path.splitext(f.name)[1]))
+
+        elif os.path.isfile(path) and name[-4] == "." and name[-3:] in {"mkv", "mp4"}:
+            if name in fix:
+                title = fix[name]
+            else:
+                title = stuff_re.sub("", name[:-4]).replace("_", " ").replace(".", " ").strip()
+
+            print("Movie: %s" % title)
+            if args.verbose:
+                print("    From %s" % name)
+
+            os.mkdir(os.path.join(temp, title))
+            os.symlink(os.path.join("..", os.path.relpath(path)), os.path.join(temp, title, title + name[-4:]))
+
         else:
-            new_name = stuff_re.sub("", os.path.splitext(f.name)[0]).replace("_", " ").strip()
-        print("    %s (from %s)" % (new_name, f.name))
-        os.symlink(os.path.join("..", os.path.relpath(dir), f.name), os.path.join(series_name, new_name + "." + os.path.splitext(f.name)[1]))
+            print("Warning: Ignoring unknown file: %s" % name)
 
+    print("=== Updating Library ===")
+    # Replace old one
+    for x in os.listdir():
+        if x.startswith("."):
+            continue
+
+        tempx = os.path.join(temp, x)
+
+        if os.path.isdir(x):
+            if os.path.isdir(tempx):
+                ok, need_update, need_del = compute_link_dir_sync(tempx, x)
+
+                if need_update or need_del:
+                    print("Update", x)
+
+                    for name in need_update:
+                        if args.verbose:
+                            print("    Update", name)
+                        os.rename(os.path.join(tempx, name), os.path.join(x, name))
+                    for name in need_del:
+                        if args.verbose:
+                            print("    Remove", name)
+                        os.unlink(os.path.join(x, name))
+
+                else:
+                    print("Keep", x)
+
+                shutil.rmtree(tempx)
+
+            else:
+                print("Remove", x)
+                shutil.rmtree(x)
+    
+    for x in os.listdir(temp):
+        print("Add", x)
+        os.rename(os.path.join(temp, x), x)
+
+
+print("=== Done ===")
 
