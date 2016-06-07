@@ -106,5 +106,8 @@ fi
 # Arch Build system
 export ASPROOT=$HOME/aur/ABS/.asp
 
+# LaTeX
+export TEXMFHOME=$DOTFILES/texmf
+
 # Local overrides
 [[ -e "$DOTFILES/zsh/zprofile.local" ]] && source "$DOTFILES/zsh/zprofile.local"
