@@ -82,6 +82,13 @@ General dotfiles repository. Everything that doesn't need to be special-cased go
 XDG configuration directory.
 Items will be symlinked to ~/.config (NOT IMPLEMENTED)
 
+.files/texmf
+------------
+Contains LaTeX classes
+
+- Intridea beamer theme
+- 'jatools' package with some Japanese-related things
+
 $HOME
 -----
 All dotfiles are symlinked into the home directory or have a proxy file generated.

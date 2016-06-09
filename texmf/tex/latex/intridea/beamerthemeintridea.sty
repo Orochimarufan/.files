@@ -32,6 +32,8 @@
 \setbeamercolor{copyright in head/foot}{fg=gray}
 \setbeamercolor{framenumber in head/foot}{fg=gray}
 
+\newcommand{\footercopyholder}{\insertshortinstitute}
+
 \defbeamertemplate*{footline}{infolines theme}
 {
   \leavevmode%
@@ -39,7 +41,7 @@
   \begin{beamercolorbox}[wd=.333333\paperwidth,ht=2.25ex,dp=2ex,center]{copyright in head/foot}%
   \end{beamercolorbox}%
   \begin{beamercolorbox}[wd=.333333\paperwidth,ht=2.25ex,dp=2ex,center]{copyright in head/foot}%
-    \usebeamerfont{copyright in head/foot}Copyright \the\year, \insertinstitute All Rights Reserved.
+    \usebeamerfont{copyright in head/foot}Copyright \the\year, \footercopyholder. All Rights Reserved.
   \end{beamercolorbox}%
   \begin{beamercolorbox}[wd=.333333\paperwidth,ht=2.25ex,dp=2ex,right]{framenumber in head/foot}%
     \usebeamerfont{framenumber in head/foot}\insertframenumber{} / \inserttotalframenumber\hspace*{2ex}
