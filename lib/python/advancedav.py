@@ -6,7 +6,7 @@ AdvancedAV FFmpeg commandline generator v2.0 [Library Edition]
     It can automatically parse input files with the help of FFmpeg's ffprobe tool (WiP)
     and allows programatically mapping streams to output files and setting metadata on them.
 -----------------------------------------------------------
-    Copyright 2014-2015 Taeyeon Mori
+    Copyright 2014-2016 Taeyeon Mori
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -32,6 +32,8 @@ from abc import ABCMeta, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence, Iterator, MutableMapping
 
 __all__ = "AdvancedAVError", "AdvancedAV", "SimpleAV"
+
+version_info = 2, 0, 1
 
 # Constants
 DEFAULT_CONTAINER = "matroska"
@@ -240,8 +242,8 @@ class InputFile(File):
 
     # -- Probe streams
     _reg_probe_streams = re.compile(
-        r"Stream #0:(?P<id>\d+)(?:\((?P<lang>[^\)]+)\))?: (?P<type>\w+): (?P<codec>\w+)"
-        r"(?: \((?P<profile>[^\)]+)\))?\s*(?P<extra>.+)?"
+        r"Stream #0:(?P<id>\d+)(?:\((?P<lang>[^\)]+)\))?:\s+(?P<type>\w+):\s+(?P<codec>[\w_\d]+)"
+        r"(?:\s+\((?P<profile>[^\)]+)\))?(?:\s+(?P<extra>.+))?"
     )
 
     def _initialize_streams(self, probe: str=None) -> Iterator:
@@ -507,6 +509,10 @@ class Task:
         for input_ in self.inputs:
             yield from input_.data_streams
 
+    def iter_streams(self) -> Iterator:
+        for input_ in self.inputs:
+            yield from input_.streams
+
     # -- FFmpeg
     @staticmethod
     def argv_options(options: Mapping, qualifier: str=None) -> Iterator:
@@ -703,6 +709,10 @@ class SimpleAV(AdvancedAV):
 
     It uses the python logging module for messages and expects the ffmpeg/ffprobe executables as arguments
     """
+    global_args = ()
+    global_conv_args = ()
+    global_probe_args = ()
+
     def __init__(self, *, ffmpeg="ffmpeg", ffprobe="ffprobe", logger=None, ffmpeg_output=True):
         if logger is None:
             import logging
@@ -728,7 +738,7 @@ class SimpleAV(AdvancedAV):
 
         :type args: Iterable[str]
         """
-        argv = tuple(itertools.chain((self._ffmpeg,), args))
+        argv = tuple(itertools.chain((self._ffmpeg,), self.global_args, self.global_conv_args, args))
 
         self.to_debug("Running Command: %s", argv)
 
@@ -741,7 +751,7 @@ class SimpleAV(AdvancedAV):
 
         :type args: Iterable[str]
         """
-        argv = tuple(itertools.chain((self._ffprobe,), args))
+        argv = tuple(itertools.chain((self._ffprobe,), self.global_args, self.global_probe_args, args))
 
         self.to_debug("Running Command: %s", argv)
 
