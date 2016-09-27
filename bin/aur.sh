@@ -184,10 +184,14 @@ aur_get_old() {
   curl "$AUR_HOST/packages/${1:0:2}/$1/$1.tar.gz" | tar xz
 }
 
+[[ -z "$AUR_GIT_OPTIONS" ]] && AUR_GIT_OPTIONS=()
+[[ -z "$AUR_GIT_PULL_OPTIONS" ]] && AUR_GIT_PULL_OPTIONS=(--rebase)
+[[ -z "$AUR_GIT_CLONE_OPTIONS" ]] && AUR_GIT_CLONE_OPTIONS=()
+
 aur_get_aur4() {
   if [ -d "$1/.git" ]; then (
     cd "$1"
-    git pull
+    git "${AUR_GIT_OPTIONS[@]}" pull "${AUR_GIT_PULL_OPTIONS[@]}"
   ) else
     if [ -e "$1" ]; then
       warn "$1 PKGBUILD directory exists but is not a git clone."
@@ -196,7 +200,7 @@ aur_get_aur4() {
       [ "$ans" = "y" ] || [ "$ans" = "yes" ] || [ "$ans" = "Y" ] || return 32
       rm -rf "$1"
     fi
-    git clone "$AUR_HOST/$1.git" "$1"
+    git "${AUR_GIT_OPTIONS[@]}" clone "${AUR_GIT_CLONE_OPTIONS[@]}" -- "$AUR_HOST/$1.git" "$1"
   fi
 }
 
