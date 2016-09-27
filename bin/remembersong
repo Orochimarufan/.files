@@ -1,0 +1,14 @@
+#!/bin/sh
+# Requires playerctl: http://dubstepdish.com/blog/2014/04/19/introducing-playerctl/
+# Useful when bound to a global Hotkey
+
+SongsFile="${1-$HOME/Documents/Songs.text}"
+
+Artist="$(playerctl metadata artist)"
+Title="$(playerctl metadata title)"
+
+
+echo "$Artist -- $Title" >>$SongsFile
+
+test -t 1 && Notify=echo || Notify=notify-send
+$Notify "Remembered ´$Title´ by ´$Artist´ in ${SongsFile##*/}"

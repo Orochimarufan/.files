@@ -1,0 +1,7 @@
+#!/bin/sh
+# Very simple background process launcher
+# Launches command in background and voids all output
+
+"$@" >/dev/null 2>&1 &
+disown
+
