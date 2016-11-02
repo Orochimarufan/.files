@@ -33,7 +33,7 @@ from collections.abc import Iterable, Mapping, Sequence, Iterator, MutableMappin
 
 __all__ = "AdvancedAVError", "AdvancedAV", "SimpleAV"
 
-version_info = 2, 0, 1
+version_info = 2, 1, 0
 
 # Constants
 DEFAULT_CONTAINER = "matroska"
@@ -46,23 +46,57 @@ S_DATA = "d"
 S_UNKNOWN = "u"
 
 
-def stream_type(type_: str) -> str:
-    """ Convert the ff-/avprobe type output to the notation used on the ffmpeg/avconv commandline """
-    lookup = {
-        "Audio": S_AUDIO,
-        "Video": S_VIDEO,
-        "Subtitle": S_SUBTITLE,
-        "Attachment": S_ATTACHMENT,
-        "Data": S_DATA
-    }
-
-    return lookup.get(type_, S_UNKNOWN)
-
-
+# == Exceptions ==
 class AdvancedAVError(Exception):
     pass
 
 
+# == Base Classes ==
+class ObjectWithOptions:
+    __slots__ = ()
+
+    def __init__(self, *, options=None, **more):
+        super().__init__(**more)
+        self.options = options or {}
+
+    def apply(self, source, *names, **omap):
+        for name in names:
+            if name in source:
+                self.options[name] = source[name]
+        if omap:
+            for define, option in omap.items():
+                if define in source:
+                    self.options[option] = source[define]
+        return self
+
+    def set(self, **options):
+        self.options.update(options)
+        return self
+
+
+class ObjectWithMetadata:
+    __slots__ = ()
+
+    def __init__(self, *, metadata=None, **more):
+        super().__init__(**more)
+        self.metadata = metadata or {}
+
+    def apply_meta(self, source, *names, **mmap):
+        for name in names:
+            if name in source:
+                self.metadata[name] = source[name]
+        if mmap:
+            for name, key in mmap.items():
+                if name in source:
+                    self.metadata[key] = source[name]
+        return self
+
+    def meta(self, **metadata):
+        self.metadata.update(metadata)
+        return self
+
+
+# === Stream Classes ===
 class Stream:
     """
     Abstract stream base class
@@ -71,16 +105,17 @@ class Stream:
     """
     __slots__ = "file", "type", "index", "pertype_index", "codec", "profile"
 
-    def __init__(self, file: "File", type_: str, index: int=None, pertype_index: int=None,
-                 codec: str=None, profile: str=None):
+    def __init__(self, file: "File", type: str, index: int=None, pertype_index: int=None,
+                 codec: str=None, profile: str=None, **more):
+        super().__init__(**more)
         self.file = file
-        self.type = type_
+        self.type = type
         self.index = index
         self.pertype_index = pertype_index
         self.codec = codec
         self.profile = profile
 
-    def update_indices(self, index: int, pertype_index: int=None):
+    def _update_indices(self, index: int, pertype_index: int=None):
         """ Update the Stream indices """
         self.index = index
         if pertype_index is not None:
@@ -110,18 +145,18 @@ class InputStream(Stream):
         self.file = file
         self.language = language
 
-    def update_indices(self, index: int, pertype_index: int=None):
+    def _update_indices(self, index: int, pertype_index: int=None):
         """ InputStreams should not have their indices changed. """
         if index != self.index:
             raise ValueError("Cannot update indices on InputStreams! (This might mean there are bogus ids in the input")
         # pertype_index gets updated by File._add_stream() so we don't throw up if it gets updated
 
 
-class OutputStream(Stream):
+class OutputStream(Stream, ObjectWithOptions, ObjectWithMetadata):
     """
     Holds information about a mapped output stream
     """
-    __slots__ = "source", "metadata", "options"
+    __slots__ = "source", "options", "metadata"
 
     # TODO: support other parameters like frame resolution
 
@@ -131,28 +166,32 @@ class OutputStream(Stream):
 
     def __init__(self, file: "OutputFile", source: InputStream, stream_id: int, stream_pertype_id: int=None,
                  codec: str=None, options: Mapping=None, metadata: MutableMapping=None):
-        super().__init__(file, source.type, stream_id, stream_pertype_id, codec)
+        super().__init__(file=file, type=source.type, index=stream_id, pertype_index=stream_pertype_id,
+            codec=codec, options=options, metadata=metadata)
         self.source = source
-        self.options = options if options is not None else {}
-        self.metadata = metadata if metadata is not None else {}
-
-    # -- Manage Stream Metadata
-    def set_meta(self, key: str, value: str):
-        """ Set a metadata key """
-        self.metadata[key] = value
-
-    def get_meta(self, key: str) -> str:
-        """ Retrieve a metadata key """
-        return self.metadata[key]
 
 
-class File:
+class OutputVideoStream(OutputStream):
+    def downscale(self, width, height):
+        # Scale while keeping aspect ratio; never upscale.
+        self.options["filter_complex"] = "scale=iw*min(1\,min(%i/iw\,%i/ih)):-1" % (width, height)
+        return self
+
+
+def output_stream_factory(file, source, *args, **more):
+    return (OutputVideoStream if source.type == S_VIDEO else OutputStream)(file, source, *args, **more)
+
+
+# === File Classes ===
+class File(ObjectWithOptions):
     """
     ABC for Input- and Output-Files
     """
-    __slots__ = "name", "options", "_streams", "_streams_by_type"
+    __slots__ = "name", "_streams", "_streams_by_type", "options"
 
-    def __init__(self, name: str, options: dict=None):
+    def __init__(self, name: str, options: dict=None, **more):
+        super().__init__(options=options, **more)
+
         self.name = name
 
         self.options = options if options is not None else {}
@@ -166,7 +205,7 @@ class File:
 
     def _add_stream(self, stream: Stream):
         """ Add a stream """
-        stream.update_indices(len(self._streams), len(self._streams_by_type[stream.type]))
+        stream._update_indices(len(self._streams), len(self._streams_by_type[stream.type]))
         self._streams.append(stream)
         self._streams_by_type[stream.type].append(stream)
 
@@ -230,11 +269,16 @@ class File:
 class InputFile(File):
     """
     Holds information about an input file
+
+    :note: Modifying the options after accessing the streams results in undefined
+            behaviour! (Currently: Changes will only apply to conv call)
     """
     __slots__ = "pp", "_streams_initialized"
 
+    stream_factory = InputStream
+
     def __init__(self, pp: "AdvancedAV", filename: str, options: Mapping=None):
-        super().__init__(filename, dict(options.items()) if options else None)
+        super().__init__(name=filename, options=dict(options.items()) if options else None)
 
         self.pp = pp
 
@@ -246,6 +290,19 @@ class InputFile(File):
         r"(?:\s+\((?P<profile>[^\)]+)\))?(?:\s+(?P<extra>.+))?"
     )
 
+    @staticmethod
+    def _stream_type(type_: str) -> str:
+        """ Convert the ff-/avprobe type output to the notation used on the ffmpeg/avconv commandline """
+        lookup = {
+            "Audio": S_AUDIO,
+            "Video": S_VIDEO,
+            "Subtitle": S_SUBTITLE,
+            "Attachment": S_ATTACHMENT,
+            "Data": S_DATA
+        }
+
+        return lookup.get(type_, S_UNKNOWN)
+
     def _initialize_streams(self, probe: str=None) -> Iterator:
         """ Parse the ffprobe output
 
@@ -254,15 +311,18 @@ class InputFile(File):
         :rtype: Iterator[InputStream]
         """
         if probe is None:
-            probe = self.pp.call_probe(("-i", self.name))
+            if self.options:
+                probe = self.pp.call_probe(itertools.chain(Task.argv_options(self.options), ("-i", self.name)))
+            else:
+                probe = self.pp.call_probe(("-i", self.name))
 
         for match in self._reg_probe_streams.finditer(probe):
-            self._add_stream(InputStream(self,
-                                         stream_type(match.group("type")),
-                                         int(match.group("id")),
-                                         match.group("lang"),
-                                         match.group("codec"),
-                                         match.group("profile")))
+            self._add_stream(self.stream_factory(self,
+                                                 self._stream_type(match.group("type")),
+                                                 int(match.group("id")),
+                                                 match.group("lang"),
+                                                 match.group("codec"),
+                                                 match.group("profile")))
         self._streams_initialized = True
 
     @property
@@ -305,27 +365,44 @@ class InputFile(File):
             self._initialize_streams()
         return self._streams_by_type[S_SUBTITLE]
 
+    @property
+    def attachment_streams(self) -> Sequence:
+        """ All attachment streams (i.e. Fonts)
 
-class OutputFile(File):
+        :rtype: Sequence[InputStream]
+        """
+        if not self._streams_initialized:
+            self._initialize_streams()
+        return self._streams_by_type[S_ATTACHMENT]
+
+    @property
+    def data_streams(self) -> Sequence:
+        """ All data streams
+
+        :rtype: Sequence[InputStream]
+        """
+        if not self._streams_initialized:
+            self._initialize_streams()
+        return self._streams_by_type[S_DATA]
+
+
+class OutputFile(File, ObjectWithMetadata):
     """
     Holds information about an output file
     """
-    __slots__ = "task", "container", "metadata", "_mapped_sources"
+    __slots__ = "task", "container", "_mapped_sources", "metadata"
 
-    def __init__(self, task: "Task", name: str, container=DEFAULT_CONTAINER, options: Mapping=None):
-        # Set default options
-        _options = {"c": "copy"}
+    stream_factory = staticmethod(output_stream_factory)
 
-        if options is not None:
-            _options.update(options)
+    def __init__(self, task: "Task", name: str, container=DEFAULT_CONTAINER,
+            options: Mapping=None, metadata: Mapping=None):
+        super().__init__(name, options=options, metadata=metadata)
 
-        # Contstuct
-        super().__init__(name, _options)
+        self.options.setdefault("c", "copy")
 
         self.task = task
 
         self.container = container
-        self.metadata = {}
         """ :type: dict[str, str] """
 
         self._mapped_sources = set()
@@ -338,7 +415,7 @@ class OutputFile(File):
         map_stream() needs to ensure that the file the stream originates from is registered as input to this Task.
         However, when called repeatedly on streams of the same file, that is superflous.
         """
-        out = OutputStream(self, stream, -1, -1, codec, options)
+        out = self.stream_factory(self, stream, -1, -1, codec, options)
 
         self._add_stream(out)
         self._mapped_sources.add(stream)
@@ -413,17 +490,12 @@ class OutputFile(File):
         for stream in itertools.chain(self.video_streams,
                                       self.audio_streams,
                                       self.subtitle_streams):
-            stream.update_indices(len(self._streams))
+            stream._update_indices(len(self._streams))
             self._streams.append(stream)
-
-    # -- Manage Global Metadata
-    def set_meta(self, key: str, value: str):
-        self.metadata[key] = value
-
-    def get_meta(self, key: str) -> str:
-        return self.metadata[key]
+        return self
 
 
+# === Task Classes ===
 class Task:
     """
     Holds information about an AV-processing Task.
@@ -431,7 +503,12 @@ class Task:
     A Task is a collection of Input- and Output-Files and related options.
     While OutputFiles are bound to one task at a time, InputFiles can be reused across Tasks.
     """
+
+    output_factory = OutputFile
+
     def __init__(self, pp: "AdvancedAV"):
+        super().__init__()
+
         self.pp = pp
 
         self.inputs = []
@@ -451,11 +528,11 @@ class Task:
         :param file: Can be either the filename of an input file or an InputFile object.
                         The latter will be created if the former is passed.
         """
-        if not isinstance(file, InputFile):
+        if  isinstance(file, str):
             if file in self.inputs_by_name:
                 return self.inputs_by_name[file]
 
-            file = InputFile(self.pp, file)
+            file = self.pp.create_input(file)
 
         if file not in self.inputs:
             self.pp.to_debug("Adding input file #%i: %s", len(self.inputs), file.name)
@@ -483,7 +560,7 @@ class Task:
             if outfile.name == filename:
                 raise AdvancedAVError("Output File '%s' already added." % filename)
         else:
-            outfile = OutputFile(self, filename, container, options)
+            outfile = self.output_factory(self, filename, container, options)
             self.pp.to_debug("New output file #%i: %s", len(self.outputs), filename)
             self.outputs.append(outfile)
             return outfile
@@ -635,13 +712,16 @@ class SimpleTask(Task):
 
     container = _redir("output", "container")
     metadata = _redir("output", "metadata")
-    name = _redir("output", "name")
     options = _redir("output", "options")
+    name = _redir("output", "name")
 
     del _redir
 
 
+# === Interface Class ===
 class AdvancedAV(metaclass=ABCMeta):
+    input_factory = InputFile
+
     # ---- Output ----
     @abstractmethod
     def to_screen(self, text: str, *fmt):
@@ -692,7 +772,7 @@ class AdvancedAV(metaclass=ABCMeta):
         return SimpleTask(self, filename, container, options)
 
     # ---- Create InputFiles ----
-    def create_input(self, filename: str, options):
+    def create_input(self, filename: str, options=None):
         """
         Create a InputFile instance
         :param filename: str The filename
@@ -700,7 +780,7 @@ class AdvancedAV(metaclass=ABCMeta):
         :return: A InputFile instance
         NOTE that Task.add_input is usually the preferred way to create inputs
         """
-        return InputFile(self, filename, options)
+        return self.input_factory(pp=self, filename=filename, options=options)
 
 
 class SimpleAV(AdvancedAV):

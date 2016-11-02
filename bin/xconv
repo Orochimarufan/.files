@@ -23,16 +23,17 @@ xconv ffpmeg wrapper based on AdvancedAV
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-from advancedav import SimpleAV, version_info as aav_version_info
+from advancedav import version_info as aav_version_info
 
 from argparse import ArgumentParser, Action
 from abc import ABCMeta, abstractmethod
 from itertools import chain
 from functools import wraps
-from os.path import isdir, join as build_path, basename, splitext, exists
-from os import environ
+from os.path import isdir, join as build_path, basename, dirname, splitext, exists, abspath
+from os import environ, makedirs, mkdir
 
-version_info = 0, 1, 1
+version_info = 0, 1, 3
+
 
 # == Misc. helpers ==
 def __update(f, name, update):
@@ -49,6 +50,7 @@ def __defaults(obj, **defs):
 
 # == Profile Decorators ==
 profiles = {}
+
 
 def profile(f):
     """
@@ -120,34 +122,22 @@ def singleaudio(profile):
     return wrapper
 
 
-# == Utilities for Profiles ==
-def downscale(outstream, width, height):
-    # Scale while keeping aspect ratio; never upscale.
-    outstream.options["filter_complex"] = "scale=iw*min(1\,min(%i/iw\,%i/ih)):-1" % (width, height)
+# == Extend AAV ==
+import advancedav
 
 
-def apply_defines(defines, object, *names, **maps):
-    # Apply defines to task/stream options
-    maps = (maps or {})
-    for name in names:
-        maps[name] = name
-    for define, option in maps.items():
-        if define in defines:
-            object.options[option] = defines[define]
+class OutputFile(advancedav.OutputFile):
+    def change_format(self, format=None, ext=None):
+        # Diverge from decorated format.
+        # Watch out for args.genout!!
+        if format:
+            self.container = format
+        if ext:
+            self.name = splitext(self.name)[0] + "." + ext
 
 
-def options(object, **options):
-    object.options.update(options)
-    return object
-
-
-def change_format(outfile, format=None, ext=None):
-    # Diverge from decorated format.
-    # Watch out for args.genout!!
-    if format:
-        outfile.container = format
-    if ext:
-        outfile.name = splitext(outfile.name)[0] + "." + ext
+class SimpleTask(advancedav.SimpleTask):
+    output_factory = OutputFile
 
 
 # == Profile definitions ==
@@ -157,19 +147,18 @@ def change_format(outfile, format=None, ext=None):
 def laptop(task):
     # add first video stream
     for s in task.iter_video_streams():
-        os = task.map_stream(s)
-        options(os,
-            codec="libx264",
-            tune=("fastdecode", "animation"),
-            profile="main",
-            preset="fast")
-        downscale(os, 1280, 800)
+        (task.map_stream(s)
+            .set(codec="libx264",
+                tune=("fastdecode", "animation"),
+                profile="main",
+                preset="fast")
+            .downscale(1280, 800))
         break
     # Add all audio streams (reencode to aac if necessary)
     for s in task.iter_audio_streams():
         os = task.map_stream(s)
         if s.codec != "aac":
-            os.options["codec"] = "aac"
+            os.set(codec="aac")
     # add all subtitle and attachment streams
     for s in chain(task.iter_subtitle_streams(), task.iter_attachment_streams()):
         task.map_stream(s)
@@ -183,10 +172,10 @@ def laptop(task):
 @singleaudio
 def flac(task, stream):
     if stream.codec == "ape":
-        stream.file.options["max_samples"] = "all" # Monkey's insane preset is insane.
-    options(task.map_stream(stream),
-        codec="flac",
-        compression_level="10")
+        stream.file.set(max_samples="all") # Monkey's insane preset is insane.
+    (task.map_stream(stream)
+        .set(codec="flac",
+            compression_level="10"))
     return True
 
 
@@ -198,15 +187,14 @@ def flac(task, stream):
 @features(argshax=None)
 @singleaudio
 def opus(task, stream, defines, args):
-    os = task.map_stream(stream)
-    options(os,
-        codec="libopus",
-        vbr="on")
-    # options
-    apply_defines(defines, os, bitrate="b")
+    os = (task.map_stream(stream)
+        .set(codec="libopus",
+            vbr="on")
+    # Defines
+        .apply(defines, bitrate="b"))
     # Output format
     if "ogg" in defines:
-        change_format(task.output, "ogg", "opus" if args.genout else None)
+        task.change_format("ogg", "opus" if args.genout else None)
     return True
 
 
@@ -216,18 +204,15 @@ def opus(task, stream, defines, args):
 @defines(stereo="Keep stereo channels")
 @singleaudio
 def audiobook(task, stream, defines):
-    out = task.map_stream(stream)
-    options(out,
-        codec="libopus",
-        vbr="on",
-        b="24k",
-        ac="1",
-        application="voip",
-        frame_duration="40")
+    out = (task.map_stream(stream)
+        .set(codec="libopus",
+            vbr="on",
+            b="32k",
+            ac="1",
+            application="voip"))
     if "stereo" in defines:
-        options(out,
-            ac="2",
-            b="32k")
+        out.set(ac="2",
+                b="36k")
     return True
 
 
@@ -237,11 +222,10 @@ def audiobook(task, stream, defines):
     fext="File extension")
 @features(argshax=None)
 def remux(task, defines, args):
-    change_format(task.output,
+    task.change_format(
         defines["format"] if "format" in defines else None,
         defines["fext"] if "fext" in defines and args.genout else None)
-    all(task.map_stream(s) for s in task.iter_streams())
-    return True
+    return all(task.map_stream(s) for s in task.iter_streams())
 
 
 # == Support code ==
@@ -298,8 +282,12 @@ def parse_args(argv):
     files = parser.add_argument_group("Files")
     files.add_argument("inputs", nargs="+", help="The input file(s)")
     files.add_argument("output", help="The output filename or directory")
-    files.add_argument("-m", "--merge", help="Merge streams from all inputs instead of mapping each input to an output", action="store_true")
+    multimode = files.add_mutually_exclusive_group()
+    multimode.add_argument("-m", "--merge", help="Merge streams from all inputs instead of mapping each input to an output", action="store_true")
+    multimode.add_argument("-C", "--concat", help="Concatenate streams from inputs instead of mapping", action="store_true")
     files.add_argument("-u", "--update", help="Only work on files that don't already exist", action="store_true")
+    files.add_argument("-c", "--create-parents", help="Create containing folders if they don't exist", action="store_true")
+    files.add_argument("-cc", "--create-folder", help="Create the output folder if it doesn't exist", action="store_true")
     profile = parser.add_argument_group("Profile")
     profile.add_argument("-p", "--profile", choices=profiles.keys(), required=True, help="Specify the profile. See the source code.")
     profile.add_argument("-l", "--list-profiles", action=ProfilesAction, nargs=0, help="List profiles and exit")
@@ -331,20 +319,23 @@ def main(argv):
 
     profile = profiles[args.profile]
 
+    if (args.create_parents or args.create_folder) and not isdir(dirname(args.output)):
+        makedirs(dirname(args.output))
+    if args.create_folder and not isdir(args.output):
+        mkdir(args.output)
+
     args.genout = isdir(args.output)
-    if not args.genout:
-        if len(args.inputs) > 1:
-            print("Output path '%s' is not a directory." % args.output)
-            return -1
 
     print("\033[36mXConv %s (AdvancedAV %s) (c) Taeyeon Mori\033[0m" % (".".join(map(str, version_info)), ".".join(map(str, aav_version_info))))
     print("\033[34mProfile: %s\033[0m" % args.profile)
 
     # Initialize AAV
-    aav = SimpleAV(ffmpeg=args.ffmpeg, ffprobe=args.ffprobe)
+    aav = advancedav.SimpleAV(ffmpeg=args.ffmpeg, ffprobe=args.ffprobe)
 
     if args.quiet:
         aav.global_conv_args = "-loglevel", "warning"
+
+    aav.global_args += "-hide_banner",
 
     # Collect Tasks
     tasks = []
@@ -352,23 +343,44 @@ def main(argv):
     print("\033[35mCollecting Tasks..\033[0m")
 
     if args.merge:
-        task = aav.create_job(make_outfile(args, profile, args.inputs[0]))
+        task = SimpleTask(aav, make_outfile(args, profile, args.inputs[0]), profile.container)
 
         for input in args.inputs:
             task.add_input(input)
 
         tasks.append(task)
 
+    elif args.concat:
+        import tempfile, os
+        tmp = tempfile.NamedTemporaryFile(mode="w", delete=False)
+
+        with tmp:
+            tmp.write("ffconcat version 1.0\n")
+            tmp.write("# XConv concat file\n")
+            for f in map(abspath, args.inputs):
+                print("\033[36m  Concatenating %s\033[0m" % basename(f))
+                tmp.write("file '%s'\n" % f)
+
+        task = SimpleTask(aav, make_outfile(args, profile, args.inputs[0]), profile.container)
+
+        options(task.add_input(tmp.name),
+            f="concat",
+            safe="0")
+
+        tasks.append(task)
+
     else:
+        if not args.genout and len(args.inputs) > 1:
+            print("\033[31mOutput path '%s' is not a directory.\033[0m" % args.output)
+            return -1
+
         for input in args.inputs:
             out = make_outfile(args, profile, input)
             if args.update and exists(out):
                 continue
-            task = aav.create_job(out, profile.container)
+            task = SimpleTask(aav, out, profile.container)
             task.add_input(input)
             tasks.append(task)
-
-            task.options["hide_banner"] = None
 
     print("\033[35mPreparing Tasks..\033[0m")
 
@@ -394,6 +406,10 @@ def main(argv):
     for task in tasks:
         print("\033[32m  Processing '%s'\033[0m" % basename(task.name))
         task.commit()
+
+    # Clean up
+    if args.concat:
+        os.unlink(tmp.name)
 
     return 0
 
