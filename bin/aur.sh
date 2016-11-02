@@ -1,5 +1,5 @@
 #!/bin/zsh
-# (c) 2014-2015 Taeyeon Mori
+# (c) 2014-2016 Taeyeon Mori
 # vim: ft=sh:ts=2:sw=2:et
 
 AUR_DEFAULT_HOST="https://aur.archlinux.org/"
@@ -81,9 +81,9 @@ process_arg() {
       LIST_ONLY=true;;
     -h|--help)
       echo "Usage $0 [-h|-u] [-S] [-L|-X] [makepkg options] <packages>"
-      echo "Taeyeon's aur.sh (c) 2014-2015 Taeyeon Mori (not related to http://aur.sh)"
+      echo "Taeyeon's aur.sh (c) 2014-2016 Taeyeon Mori (not related to http://aur.sh)"
       echo
-      echo "A simple AUR client realized in bash/zsh"
+      echo "A simple AUR client realized in zsh"
       echo
       echo "aur.sh options:"
       echo "  -h, --help    Display this message"
@@ -205,107 +205,76 @@ aur_get_aur4() {
 }
 
 # ----------------------------------------------------------------------------
-# Actual work starts here
-# Print some info
-msg "[AUR] AURDIR=$AURDIR; PKGDEST=$PKGDEST"
+# package functions
+declare -a AFFECTED_PKGS
+declare -A PKG_INFO
 
-if $ADD_UPDATES; then
-  [ -n "$packages" ] && throw 31 "You cannot specify package names when using --update"
-  OFS="$IFS"
-  IFS=$'\n'
-  for update in `cower -u`; do
-    packages=("${packages[@]}" "`echo $update | cut -d' ' -f2`")
-  done
-  IFS="$OFS"
+# Metadata collection
+parse_pkgbuild() {
+  local p="$1"
+  local path="$2"
 
-  msg "[AUR] Updates available for: ${packages[*]}"
+  # Funky
+  PKG_INFO["$p:Depends"]="$( ( source "$path"; echo "${depends[@]}"; ) )"
+}
 
-  if [ -n "$EXCLUDE" -o -n "$AURSH_IGNORE_UPDATES" ]; then
-    packages=(`echo ${packages[@]} | sed -re "s/$(echo $EXCLUDE $AURSH_IGNORE_UPDATES | sed -e 's/[ ,]/|/g')//g"`)
-  fi
-fi
-
-if [ -z "$packages" ]; then
-  warn "[AUR] Nothing to do."
-  exit 0
-else
-  msg "[AUR] Package set: ${packages[*]}"
-fi
-
-# Figure out build directory
-if ! $DL_ONLY && ! $LIST_ONLY; then
-  tmpbuild=${TMPDIR-/tmp}/aur.sh.$$
-  build="${BUILDDIR:-$tmpbuild}"
-  test -d "$build" || mkdir -p "$build" || throw 1 "Couldn't create build directory"
-
-  clean_exit() {
-    rm "$build/aur.sh.running" 2>/dev/null || true
-    exit ${1-0}
-  }
-  trap clean_exit TERM
-  trap clean_exit INT
-  touch "$build/aur.sh.running"
-
-  test "$build" = "$PWD" || \
-    msg "[AUR] Working in $build."
-  msg "[AUR] Building packages: $packages"
-
-  if ! $ASK; then
-    msg "[AUR] Updating sudo timestamp"
-    sudo -v
-
-    add_makepkg_arg "--noconfirm"
-  fi
-
-  $ASDEPS && add_makepkg_arg "--asdeps"
-
-  msg "[AUR] Makepkg args: ${makepkg_args[*]}"
-fi
-
-
-AFFECTED_PKGS=()
-
-# Package processing
-build_package() {
+collect_package() {
   local p="$1" # package name
   local COWER_INFO="$2"
 
+  # Skip dupes (prob. from dependencies)
+  if [ -n "${AFFECTED_PKGS[(r)$p]}" ]; then
+    return 0
+  fi
+
   if [ -e "$CUSTOMDIR/$p" ]; then
-    cd "$CUSTOMDIR"
-    AFFECTED_PKGS=("${AFFECTED_PKGS[@]}" "$p")
-    $LIST_ONLY && return
     msg "[AUR] Found '$p' in '$CUSTOMDIR', Using that"
+    cd "$CUSTOMDIR"
+    PKG_INFO["$p:From"]="$CUSTOMDIR/$p"
+    parse_pkgbuild "$p" "$CUSTOMDIR/$p/PKGBUILD"
   else
     if $USE_COWER; then
-      [ -z "$COWER_INFO" ] && COWER_INFO=`cower -i $p`
+      if [ -z "$COWER_INFO" ]; then
+        COWER_INFO=`cower -i "$p"`
+      fi
+
+      PKG_INFO["$p:CowerInfo"]="$COWER_INFO"
 
       info_grep() {
         echo "$COWER_INFO" | grep "$@" | cut -d: -f2
       }
 
-      local PACKBASE=`info_grep PackageBase | sed -e 's/^\s*//' -e 's/\s*$//'`
-      if [ -n "$PACKBASE" ]; then
-        color 35 echo "[AUR] $p: Is a split package. Selecting base package '$PACKBASE' instead."
-        warn "[AUR] Operations on specific sub-packages require the base package to be specified along with --pkg."
-        build_package "$PACKBASE" "`echo "$COWER_INFO" | grep -v PackageBase`"
-        return $?
-      fi
-
-      local DEPENDS=`info_grep -i depends`
-      if $RECURSE_DEPS; then
-        for dep in `echo $DEPENDS`; do
-          if ! pacman -Qi "$dep" >/dev/null 2>&1 && cower -i "$dep" >/dev/null 2>&1; then # Check if it's an (un-installed) aur package
-            color 35 echo "[AUR] $p: Building AUR dependency '$dep'..."
-            build_package "$dep"
-          fi
-        done
-      fi
+      PKG_INFO["$p:PackageBase"]=`info_grep PackageBase | sed -e 's/^\s*//' -e 's/\s*$//'`
+      PKG_INFO["$p:Depends"]=`info_grep -i depends`
     fi
+  fi
 
-    AFFECTED_PKGS=("${AFFECTED_PKGS[@]}" "$p")
+  if [ -n "${PKG_INFO["$p:PackageBase"]}" ]; then
+    color 35 echo "[AUR] $p: Is a split package. Selecting base package '${PKG_INFO["$p:PackageBase"]}' instead."
+    warn "[AUR] Operations on specific sub-packages require the base package to be specified along with --pkg."
+    collect_package "${PKG_INFO["$p:PackageBase"]}" "`echo "${PKG_INFO["$p:CowerInfo"]}" | grep -v PackageBase`"
+    return $?
+  fi
 
-    $LIST_ONLY && return
+  if [ -n "${PKG_INFO["$p:Depends"]}" ]; then
+    if $RECURSE_DEPS; then
+      for dep in `echo ${PKG_INFO["$p:Depends"]}`; do
+        if ! pacman -Qi "$dep" >/dev/null 2>&1 && cower -i "$dep" >/dev/null 2>&1; then # Check if it's an (un-installed) aur package
+          color 35 echo "[AUR] $p: Collecting AUR dependency '$dep'..."
+          collect_package "$dep"
+        fi
+      done
+    fi
+  fi
 
+  AFFECTED_PKGS=("${AFFECTED_PKGS[@]}" "$p")
+}
+
+# Package processing
+fetch_package() {
+  local p="$1"
+
+  if [ -z "${PKG_INFO["$p:From"]}" ]; then
     # First, download the PKGBUILD from AUR, to $AURDEST
     cd "$AURDEST"
     msg "[AUR] $p: Getting PKGBUILD"
@@ -316,12 +285,16 @@ build_package() {
       warn "[AUR] $p: Found #CUSTOMPKG; not updating PKGBUILD from AUR!" \
     } || \
       $aur_get "$p" || throw 2 "[AUR] $p: Couldn't download package"
-  fi
 
-  $DL_ONLY && return
+    PKG_INFO["$p:From"]="$AURDEST/$p"
+  fi
+}
+
+build_package() {
+  local p="$1" # package name
 
   # Copy it to the build directory $build and change there
-  cp -Lr "$p" "$build"
+  cp -Lr "${PKG_INFO["$p:From"]}" "$build/$p"
   cd "$build/$p"
 
   # Update timestamp, but don't ask for pw if it expired
@@ -335,23 +308,99 @@ build_package() {
   msg "[AUR] $p: Done!"
 }
 
-# Process packages
-for p in "${packages[@]}"; do
-  build_package "$p"
-done
+# ============== Main ========================
+# Actual work starts here
+# Print some info
+msg "[AUR] AURDIR=$AURDIR; PKGDEST=$PKGDEST"
 
-if $LIST_ONLY; then
-  echo "Affected Packages: `echo "${AFFECTED_PKGS[@]}" | sed 's/ /\n/g' | awk '!_[$0]++{printf "%s ",$0}'`"
-else
-  msg "[AUR] All Done!"
+# Check updates ------------------------
+if $ADD_UPDATES; then
+  declare -a updates
+
+  OFS="$IFS"
+  IFS=$'\n'
+  for update in `cower -u`; do
+    updates=("${updates[@]}" "`echo $update | cut -d' ' -f2`")
+  done
+  IFS="$OFS"
+
+  msg "[AUR] Updates available for: ${updates[*]}"
+
+  if [ -n "$EXCLUDE" -o -n "$AURSH_IGNORE_UPDATES" ]; then
+    msg "[AUR] Ignoring updates for: $EXCLUDE $AURSH_IGNORE_UPDATES"
+    updates=(`echo ${updates[@]} | sed -re "s/$(echo $EXCLUDE $AURSH_IGNORE_UPDATES | sed -e 's/[ ,]/|/g')//g"`)
+  fi
+
+  packages=("${updates[@]}" "${packages[@]}")
 fi
 
-# Remove the builddir if we previously created it.
-if ! $DL_ONLY && ! $LIST_ONLY; then
-  cd "$AURDEST"
-  [ "$build" = "$tmpbuild" ] && \
-    warn "[AUR] Removing temporary directory $tmpbuild" && \
-    rm -rf "$tmpbuild"
+if [ -z "$packages" ]; then
+  warn "[AUR] Nothing to do."
   clean_exit
 fi
 
+msg "[AUR] Package set: ${packages[*]}"
+
+# Collect package metadata ---------------
+for p in "${packages[@]}"; do
+  collect_package "$p"
+done
+
+msg "[AUR] Affected Packages: ${AFFECTED_PKGS[@]}"
+
+if $LIST_ONLY; then
+  clean_exit
+fi
+
+# Fetch packages --------------------------
+for p in "${AFFECTED_PKGS[@]}"; do
+  fetch_package "$p"
+done
+
+if $DL_ONLY; then
+  clean_exit
+fi
+
+# Build packages --------------------------
+# Figure out build directory
+tmpbuild="${TMPDIR-/tmp}/aur.sh.$$"
+build="${BUILDDIR:-$tmpbuild}"
+test -d "$build" || mkdir -p "$build" || throw 1 "Couldn't create build directory"
+
+clean_exit() {
+  rm "$build/aur.sh.running" 2>/dev/null || true
+  exit ${1-0}
+}
+
+trap clean_exit TERM
+trap clean_exit INT
+touch "$build/aur.sh.running"
+
+test "$build" = "$PWD" || \
+  msg "[AUR] Working in $build."
+
+if ! $ASK; then
+  msg "[AUR] Updating sudo timestamp"
+  sudo -v
+
+  add_makepkg_arg "--noconfirm"
+fi
+
+$ASDEPS && add_makepkg_arg "--asdeps"
+
+msg "[AUR] Makepkg args: ${makepkg_args[*]}"
+
+# Build
+for p in "${AFFECTED_PKGS[@]}"; do
+  build_package "$p"
+done
+
+msg "[AUR] All Done!"
+
+
+# Remove the builddir if we previously created it.
+cd "$AURDEST"
+[ "$build" = "$tmpbuild" ] && \
+  warn "[AUR] Removing temporary directory $tmpbuild" && \
+  rm -rf "$tmpbuild"
+clean_exit
