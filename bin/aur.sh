@@ -17,6 +17,29 @@ function clean_exit {
   exit ${1-0}
 }
 
+# Load ZSH Extensions
+autoload is-at-least
+
+function is-exactly {
+  [[ "$1" == "$2" ]]
+  return $?
+}
+
+function is-at-most {
+  ! is-at-least "$1" "$2" || is-exactly "$1" "$2"
+  return $?
+}
+
+function is-less {
+  ! is-at-least "$1" "$2"
+  return $?
+}
+
+function is-more {
+  ! is-at-most "$1" "$2"
+  return $?
+}
+
 
 # ------------------------------------------------------------------------------
 # Parse commandline: anything prefixed with - is a makepkg option, others are package names
@@ -215,7 +238,7 @@ parse_pkgbuild() {
   local path="$2"
 
   # Funky
-  PKG_INFO["$p:Depends"]="$( ( source "$path"; echo "${depends[@]}"; ) )"
+  PKG_INFO[$p:Depends]="$( ( source "$path"; echo "$depends[@]"; ) )"
 }
 
 collect_package() {
@@ -223,14 +246,14 @@ collect_package() {
   local COWER_INFO="$2"
 
   # Skip dupes (prob. from dependencies)
-  if [ -n "${AFFECTED_PKGS[(r)$p]}" ]; then
+  if (( $AFFECTED_PKGS[(I)$p] )); then
     return 0
   fi
 
   if [ -e "$CUSTOMDIR/$p" ]; then
     msg "[AUR] Found '$p' in '$CUSTOMDIR', Using that"
     cd "$CUSTOMDIR"
-    PKG_INFO["$p:From"]="$CUSTOMDIR/$p"
+    PKG_INFO[$p:From]="$CUSTOMDIR/$p"
     parse_pkgbuild "$p" "$CUSTOMDIR/$p/PKGBUILD"
   else
     if $USE_COWER; then
@@ -238,33 +261,66 @@ collect_package() {
         COWER_INFO=`cower -i "$p"`
       fi
 
-      PKG_INFO["$p:CowerInfo"]="$COWER_INFO"
+      PKG_INFO[$p:CowerInfo]="$COWER_INFO"
 
       info_grep() {
         echo "$COWER_INFO" | grep "$@" | cut -d: -f2
       }
 
-      PKG_INFO["$p:PackageBase"]=`info_grep PackageBase | sed -e 's/^\s*//' -e 's/\s*$//'`
-      PKG_INFO["$p:Depends"]=`info_grep -i depends`
+      PKG_INFO[$p:PackageBase]=`info_grep PackageBase | sed -e 's/^\s*//' -e 's/\s*$//'`
+      PKG_INFO[$p:Depends]=`info_grep -i depends`
+      PKG_INFO[$p:Version]=`info_grep -i version`
     fi
   fi
 
-  if [ -n "${PKG_INFO["$p:PackageBase"]}" ]; then
-    color 35 echo "[AUR] $p: Is a split package. Selecting base package '${PKG_INFO["$p:PackageBase"]}' instead."
+  if [ -n "$PKG_INFO[$p:PackageBase]" ]; then
+    color 35 echo "[AUR] $p: Is a split package. Selecting base package '$PKG_INFO[$p:PackageBase]' instead."
     warn "[AUR] Operations on specific sub-packages require the base package to be specified along with --pkg."
-    collect_package "${PKG_INFO["$p:PackageBase"]}" "`echo "${PKG_INFO["$p:CowerInfo"]}" | grep -v PackageBase`"
+    collect_package "$PKG_INFO[$p:PackageBase]" "`echo "$PKG_INFO[$p:CowerInfo]" | grep -v PackageBase`"
     return $?
   fi
 
-  if [ -n "${PKG_INFO["$p:Depends"]}" ]; then
-    if $RECURSE_DEPS; then
-      for dep in `echo ${PKG_INFO["$p:Depends"]}`; do
-        if ! pacman -Qi "$dep" >/dev/null 2>&1 && cower -i "$dep" >/dev/null 2>&1; then # Check if it's an (un-installed) aur package
-          color 35 echo "[AUR] $p: Collecting AUR dependency '$dep'..."
-          collect_package "$dep"
+  if [ -n "$PKG_INFO[$p:Depends]" ]; then
+    # process dependencies
+    PKG_INFO[$p:Dependencies]=""
+    for dep in ${(z)PKG_INFO[$p:Depends]}; do
+      if echo "$dep" | grep -qE "[=<>]"; then # Parse Version constraints
+        dereq=""
+        case "$dep" in
+          (*\<=*) dereq=is-at-most; delim="<=";;
+          (*=\<*) dereq=is-at-most; delim="=<";;
+          (*\>=*) dereq=is-at-least; delim=">=";;
+          (*=\>*) dereq=is-at-least; delim="=>";;
+          (*\<*) dereq=is-less; delim="<";;
+          (*\>*) dereq=is-more; delim=">";;
+          (*=*) dereq=is-exactly; delim="=";;
+          (*) warn "[AUR] Faulty dependency: $dep";;
+        esac
+        if [ -n "$dereq" ]; then
+          depname=${dep%$delim*}
+          depver=${dep#*$delim}
+          PKG_INFO[$p:Dependencies]="$PKG_INFO[$p:Dependencies] $depname"
+          constraint=${depname// /}:VersionConstraints:$p
+          if [ -n "$PKG_INFO[$constraint]" ]; then
+            ct=1; while [ -n "$PKG_INFO[$constraint#$ct]" ]; do ct=$[$ct + 1]; done
+            constraint="$constraint#$ct"
+          fi
+          PKG_INFO[$constraint]="$dereq ${depver// /}"
         fi
-      done
-    fi
+      else
+        PKG_INFO[$p:Dependencies]="$PKG_INFO[$p:Dependencies] $dep"
+      fi
+    done
+
+    for dep in ${(z)PKG_INFO[$p:Dependencies]}; do
+      if (( $packages[(I)$dep] )); then # make sure queued dependencies are processed before dependants, even if a version is already installed
+        collect_package "$dep"
+      fi
+      if $RECURSE_DEPS && ! pacman -Qi "$dep" >/dev/null 2>&1 && cower -i "$dep" >/dev/null 2>&1; then # Check if it's an (un-installed) aur package
+        color 35 echo "[AUR] $p: Collecting AUR dependency '$dep'..."
+        collect_package "$dep"
+      fi
+    done
   fi
 
   AFFECTED_PKGS=("${AFFECTED_PKGS[@]}" "$p")
@@ -274,7 +330,7 @@ collect_package() {
 fetch_package() {
   local p="$1"
 
-  if [ -z "${PKG_INFO["$p:From"]}" ]; then
+  if [ -z "$PKG_INFO[$p:From]" ]; then
     # First, download the PKGBUILD from AUR, to $AURDEST
     cd "$AURDEST"
     msg "[AUR] $p: Getting PKGBUILD"
@@ -286,7 +342,7 @@ fetch_package() {
     } || \
       $aur_get "$p" || throw 2 "[AUR] $p: Couldn't download package"
 
-    PKG_INFO["$p:From"]="$AURDEST/$p"
+    PKG_INFO[$p:From]="$AURDEST/$p"
   fi
 }
 
@@ -294,7 +350,7 @@ build_package() {
   local p="$1" # package name
 
   # Copy it to the build directory $build and change there
-  cp -Lr "${PKG_INFO["$p:From"]}" "$build/$p"
+  cp -Lr "$PKG_INFO[$p:From]" "$build/$p"
   cd "$build/$p"
 
   # Update timestamp, but don't ask for pw if it expired
@@ -317,21 +373,19 @@ msg "[AUR] AURDIR=$AURDIR; PKGDEST=$PKGDEST"
 if $ADD_UPDATES; then
   declare -a updates
 
-  OFS="$IFS"
-  IFS=$'\n'
-  for update in `cower -u`; do
-    updates=("${updates[@]}" "`echo $update | cut -d' ' -f2`")
+  for update in ${(f)$(cower -u)}; do
+    updates=("$updates[@]" "${${(s: :)update}[2]}")
   done
-  IFS="$OFS"
 
-  msg "[AUR] Updates available for: ${updates[*]}"
+  msg "[AUR] Updates available for: $updates[*]"
 
-  if [ -n "$EXCLUDE" -o -n "$AURSH_IGNORE_UPDATES" ]; then
-    msg "[AUR] Ignoring updates for: $EXCLUDE $AURSH_IGNORE_UPDATES"
-    updates=(`echo ${updates[@]} | sed -re "s/$(echo $EXCLUDE $AURSH_IGNORE_UPDATES | sed -e 's/[ ,]/|/g')//g"`)
+  ignore=($(echo $EXCLUDE $AURSH_IGNORE_UPDATES | tr , " "))
+  if (( ${#ignore} )); then
+    msg "[AUR] Ignoring updates for: $ignore[*]"
+    updates=${updates:|ignore}
   fi
 
-  packages=("${updates[@]}" "${packages[@]}")
+  packages=("$updates[@]" "$packages[@]")
 fi
 
 if [ -z "$packages" ]; then
@@ -346,7 +400,17 @@ for p in "${packages[@]}"; do
   collect_package "$p"
 done
 
-msg "[AUR] Affected Packages: ${AFFECTED_PKGS[@]}"
+msg "[AUR] Affected Packages: $AFFECTED_PKGS[@]"
+
+# Check version constraints
+for constraint in ${(@kM)PKG_INFO:#*:VersionConstraints:*}; do
+  name=${constraint%%:*}
+  if (( $AFFECTED_PKGS[(I)$name] )); then
+    if ! ${(z)PKG_INFO[$constraint]} $PKG_INFO[$name:Version]; then
+      warn "[AUR] Version constraint not satisfied: ${constraint##*:} requires that $name $PKG_INFO[$constraint]"
+    fi
+  fi
+done
 
 if $LIST_ONLY; then
   clean_exit
@@ -404,3 +468,4 @@ cd "$AURDEST"
   warn "[AUR] Removing temporary directory $tmpbuild" && \
   rm -rf "$tmpbuild"
 clean_exit
+
