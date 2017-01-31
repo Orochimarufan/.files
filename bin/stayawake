@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Sleep Timer for Aufio Books, inspired by some of the nice Android audiobook players
+# Sleep Timer for Audio Books, inspired by some of the nice Android audiobook players
 # (c) 2015 by Taeyeon Mori
 
 
@@ -9,13 +9,13 @@ import sys
 import subprocess
 
 
-cmd = ["audacious", "--pause"]
-beep = "/usr/share/sounds/freedesktop/stereo/complete.oga"
+cmd = ["playerctl", "pause"]
+beep = "/usr/share/sounds/freedesktop/stereo/bell.oga"
 
 
 def run_task():
     print("Rnunning ", cmd)
-    subprocess.check_call(cmd)
+    subprocess.Popen(cmd)
 
 
 

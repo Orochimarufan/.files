@@ -44,5 +44,8 @@ function gupf {
     )
 }
 
+# rsync options
+alias rsync="rsync -aXzPvihs -e ssh"
+
 # Local overrides
 [[ -e "$DOTFILES/zsh/zshrc.local" ]] && source "$DOTFILES/zsh/zshrc.local"

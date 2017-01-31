@@ -35,7 +35,7 @@ for cx in "$@"; do
         -*)
             sevenzip_args+=("$cx");;
         *)
-            args+=("$cx");;
+            args+=("`realpath "$cx"`");;
     esac
 done
 
@@ -56,7 +56,7 @@ fi
 $test_run || \
     convmv_args+=("--notest")
 
-destination="`realpath "$destination"`"
+#destination="`realpath "$destination"`"
 
 # Make temp dir to not impact other files
 if [ -d "$destination" ]; then
