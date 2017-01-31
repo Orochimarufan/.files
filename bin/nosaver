@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+# (c) 2017 Taeyeon Mori
+
+import sys
+from PyQt5 import QtGui, QtWidgets
+import dbus
+
+
+def main(argv):
+    # Initialize DBus
+    bus = dbus.SessionBus()
+    sso = bus.get_object('org.freedesktop.ScreenSaver', '/org/freedesktop/ScreenSaver')
+    inhibit = sso.get_dbus_method("Inhibit", "org.freedesktop.ScreenSaver")
+    uninhibit = sso.get_dbus_method("UnInhibit", "org.freedesktop.ScreenSaver")
+
+    # Initialize Tray Icon
+    app = QtWidgets.QApplication(argv)
+    app.setApplicationName("ScreenSaver Inhibit")
+
+    menu = QtWidgets.QMenu()
+    ctext = menu.addAction("Cookie")
+    ctext.setEnabled(False)
+    exit = menu.addAction("Quit")
+    exit.triggered.connect(app.exit)
+
+    tray = QtWidgets.QSystemTrayIcon()
+    tray.setIcon(QtGui.QIcon.fromTheme("screensaver"))
+    tray.setContextMenu(menu)
+    tray.show()
+
+    # Run
+    cookie = inhibit("ScreenSaver Inhibit Tray Application", "User Inhibit")
+    print("Inhibited: ", cookie)
+    ctext.setText("Cookie: %s" % cookie)
+
+    try:
+        app.exec()
+
+    finally:
+        uninhibit(cookie)
+        print("UnInhibited")
+
+
+if __name__ == "__main__":
+    main(sys.argv)
+
