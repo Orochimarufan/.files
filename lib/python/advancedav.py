@@ -6,7 +6,7 @@ AdvancedAV FFmpeg commandline generator v2.0 [Library Edition]
     It can automatically parse input files with the help of FFmpeg's ffprobe tool (WiP)
     and allows programatically mapping streams to output files and setting metadata on them.
 -----------------------------------------------------------
-    Copyright 2014-2016 Taeyeon Mori
+    Copyright 2014-2017 Taeyeon Mori
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -31,9 +31,15 @@ import itertools
 from abc import ABCMeta, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence, Iterator, MutableMapping
 
+try:
+    from pathlib import Path, PurePath
+except ImportError:
+    pass
+
+
 __all__ = "AdvancedAVError", "AdvancedAV", "SimpleAV"
 
-version_info = 2, 1, 0
+version_info = 2, 1, 1
 
 # Constants
 DEFAULT_CONTAINER = "matroska"
@@ -187,12 +193,17 @@ class File(ObjectWithOptions):
     """
     ABC for Input- and Output-Files
     """
-    __slots__ = "name", "_streams", "_streams_by_type", "options"
+    __slots__ = "name", "_streams", "_streams_by_type", "options", "path"
 
     def __init__(self, name: str, options: dict=None, **more):
         super().__init__(options=options, **more)
 
-        self.name = name
+        if Path: # Need to 
+            self.path = Path(name)
+            self.name = str(name)
+        else:
+            self.name = name
+
 
         self.options = options if options is not None else {}
         """ :type: dict[str, str] """
@@ -528,6 +539,8 @@ class Task:
         :param file: Can be either the filename of an input file or an InputFile object.
                         The latter will be created if the former is passed.
         """
+        if  PurePath and isinstance(file, PurePath): # Pathlib support
+            file = str(file)
         if  isinstance(file, str):
             if file in self.inputs_by_name:
                 return self.inputs_by_name[file]
