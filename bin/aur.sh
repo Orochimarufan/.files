@@ -9,13 +9,16 @@ source "$DOTFILES/lib/libzsh-utils.zsh"
 source "$DOTFILES/etc/aur.conf"
 
 function throw {
+  # throw <exit code> <err msg>
   err "$2"
   clean_exit $1
 }
 
 function clean_exit {
+  # clean_exit <exit code>
   exit ${1-0}
 }
+
 
 # Load ZSH Extensions
 autoload is-at-least
@@ -51,11 +54,15 @@ DL_ONLY=false
 ASK=false
 AUR_HOST="$AUR_DEFAULT_HOST"
 ADD_UPDATES=false
+ADD_SCMPKGS=false
 RECURSE_DEPS=false
 NEED_COWER=false
 LIST_ONLY=false
+IGNORE_ERRORS=false
 EXCLUDE=
 ASDEPS=true
+NEEDED=true
+NOCONFIRM=true
 
 add_makepkg_arg() {
   makepkg_args=("${makepkg_args[@]}" "$1")
@@ -76,6 +83,14 @@ process_arg() {
         AUR_HOST="$cx";;
       --exclude)
         EXCLUDE=",$cx";;
+      --threads)
+        if [ "${cx:0:1}" = "-" -o "${cx:0:1}" = "+" ]; then
+          export MAKEPKG_MAKETHREADS=$[`nproc` + $cx]
+        elif [ "$cx" = 0 ]; then
+          export MAKEPKG_MAKETHREADS=`nproc`
+        else
+          export MAKEPKG_MAKETHREADS=$cx
+        fi;;
     esac
     _next_arg=
     continue
@@ -92,16 +107,23 @@ process_arg() {
       ASK=true;;
     --aur-host|--exclude) # need more args
       _next_arg="$cx";;
+    -j|--threads)
+      _next_arg=--threads;;
+    -1)
+      export MAKEPKG_MAKETHREADS=$[`nproc` - 1];;
     -u|--update)
-      [ -n "$MODE" ] && throw 255 "Can only use one flag from the 'aur.sh command' category"
       NEED_COWER=true
       ADD_UPDATES=true;;
+    -g|--scm-packages|--scm-update)
+      ADD_SCMPKGS=true;;
     -S|--recurse-deps)
       NEED_COWER=true
       RECURSE_DEPS=true
-      add_makepkg_arg -is;;
+      add_makepkg_arg -i;;
     -L|--list-only)
       LIST_ONLY=true;;
+    -E|--ignore-errors)
+      IGNORE_ERRORS=true;;
     -h|--help)
       echo "Usage $0 [-h|-u] [-S] [-L|-X] [makepkg options] <packages>"
       echo "Taeyeon's aur.sh (c) 2014-2016 Taeyeon Mori (not related to http://aur.sh)"
@@ -111,31 +133,46 @@ process_arg() {
       echo "aur.sh options:"
       echo "  -h, --help    Display this message"
       echo "  -u, --update  Build all updated AUR packages [c]"
+      echo "  -g, --scm-update, --scm-packages"
+      echo "                Try to rebuild all *-git packages"
       echo "  -S, --recurse-deps"
       echo "                Recursively build & install all dependencies [c]"
-      echo "                Implies -is"
+      echo "                Implies -i (Auto-install built packages)"
       echo "  -L, --list-only"
       echo "                Only list all affected packages"
       echo "  -X, --download-only"
       echo "                Only download the PKGBUILDs from AUR, don't build."
+      echo "  -E, --ignore-errors"
+      echo "                Continue with the next package even after a failure."
+      echo "  -j, --threads [+-]<n>"
+      echo "                Set \$MAKEPKG_MAKETHREADS to be used in makepkg.conf"
+      echo "                Values prefixed with + or - are added to the number of host cpus"
+      echo "  -1            Short for '--threads -1'"
+      echo "  --ask         Review changes before building packages"
+      echo "  --exclude <pkgs>"
+      echo "                Exclude packages from -u"
       echo "  --aur-host <url>"
       echo "                Use a different AUR server. default: https://aur.archlinux.org/"
       echo "  --old-aur     Use the old (non-git) AUR methods"
-      echo "  --ask         Ask before installing packages (removes --noconfirm)"
-      echo "  --clean       Clean up leaftover temporary files (of failed builds) and exit"
-      echo "  --exclude <pkgs>"
-      echo "                Exclude packages from -u"
-      echo "  --asexplicit  Don't pass --asdeps to makepkg"
       echo
-      echo "Useful makepkg options:"
+      echo "  --clean       Clean up leaftover temporary files (of failed builds) and exit"
+      echo
+      echo "Makepkg/Pacman options:"
       echo "  -i            Install package after building it"
       echo "  -s            Install dependencies from official repos"
       echo "  --pkg <list>  Only build selected packages (when working with split packages)"
+      echo "  --no-asdeps, --asexplicit"
+      echo "                Don't pass --asdeps to pacman"
+      echo "  --no-needed, --reinstall"
+      echo "                Don't pass --needed to pacman"
+      echo "  --no-noconfirm"
+      echo "                Don't pass --noconfirm to makepkg/pacman"
       echo
       echo "NOTE: options marked [c] require cower to be installed (\$ aur.sh -is cower)"
       echo "      However, certain cower-only features are automatically enabled when cower is found."
       exit 0
       ;;
+    # Clean up files from failed operations
     --clean)
       local temp="${TMPDIR-/tmp}"
       for tmp in `find "$temp" -name 'aur.sh.*'`; do
@@ -148,8 +185,19 @@ process_arg() {
       done
       color 35 echo "Cleaned leftover temporary files."
       exit 0;;
-    --asexplicit)
+    # Inverted makepkg args
+    --asdeps|--no-asexplicit)
+      ASDEPS=true;;
+    --no-asdeps|--asexplicit)
       ASDEPS=false;;
+    --needed|--no-reinstall)
+      NEEDED=true;;
+    --no-needed|--reinstall)
+      NEEDED=false;;
+    --noconfirm)
+      NOCONFIRM=true;;
+    --no-noconfirm)
+      NOCONFIRM=false;;
     # Makepkg args
     --pkg|--key|--config|-p) # These take an additional value
       _proxy_args=1
@@ -175,6 +223,10 @@ for cx in "$@"; do
   esac
 done
 
+# Inverted Makepkg args
+$ASDEPS && add_makepkg_arg "--asdeps"
+$NEEDED && add_makepkg_arg "--needed"
+$NOCONFIRM && add_makepkg_arg "--noconfirm"
 
 # Cower Detection
 USE_COWER=false
@@ -230,7 +282,19 @@ aur_get_aur4() {
 # ----------------------------------------------------------------------------
 # package functions
 declare -a AFFECTED_PKGS
+declare -a FAILED_PKGS
 declare -A PKG_INFO
+
+function pkg_failed {
+  # pkg_failed <pkg name> <exit code> <err msg>
+  FAILED_PKGS=("${FAILED_PKGS[@]}" "$1")
+  if $IGNORE_ERRORS; then
+    err "$3"
+  else
+    throw "$2" "$3"
+  fi
+  return "$2"
+}
 
 # Metadata collection
 parse_pkgbuild() {
@@ -340,7 +404,8 @@ fetch_package() {
       grep -q "#CUSTOMPKG" $p/PKGBUILD && \
       warn "[AUR] $p: Found #CUSTOMPKG; not updating PKGBUILD from AUR!" \
     } || \
-      $aur_get "$p" || throw 2 "[AUR] $p: Couldn't download package"
+      $aur_get "$p" || \
+        { pkg_failed "$p" 2 "[AUR] $p: Couldn't download package!"; return $? }
 
     PKG_INFO[$p:From]="$AURDEST/$p"
   fi
@@ -359,7 +424,7 @@ build_package() {
   # Run makepkg
   msg "[AUR] $p: Building..."
   makepkg "${makepkg_args[@]}" || \
-    throw 1 "[AUR] $p: Makepkg failed!"
+    { pkg_failed "$p" 1 "[AUR] $p: Makepkg failed!"; return $? }
 
   msg "[AUR] $p: Done!"
 }
@@ -370,22 +435,49 @@ build_package() {
 msg "[AUR] AURDIR=$AURDIR; PKGDEST=$PKGDEST"
 
 # Check updates ------------------------
+if $ADD_UPDATES || $ADD_SCMPKGS; then
+  ignore=($(echo $AURSH_IGNORE_UPDATES | tr , " "))
+  if (( ${#ignore} )); then
+    msg "[AUR] Ignoring updates for: ${ignore[*]}"
+  fi
+fi
+
 if $ADD_UPDATES; then
   declare -a updates
 
-  for update in ${(f)$(cower -u)}; do
-    updates=("$updates[@]" "${${(s: :)update}[2]}")
+  for update in "${(f)$(cower -u)}"; do
+    updates=("${updates[@]}" "${${(s: :)update}[2]}")
   done
 
-  msg "[AUR] Updates available for: $updates[*]"
+  msg "[AUR] Updates available for: ${updates[*]}"
 
-  ignore=($(echo $EXCLUDE $AURSH_IGNORE_UPDATES | tr , " "))
   if (( ${#ignore} )); then
-    msg "[AUR] Ignoring updates for: $ignore[*]"
-    updates=${updates:|ignore}
+    updates=(${updates:|ignore})
   fi
 
-  packages=("$updates[@]" "$packages[@]")
+  packages=("${updates[@]}" "${packages[@]}")
+fi
+
+if $ADD_SCMPKGS; then
+  declare -a scmpkgs
+
+  for update in "${(f)$(pacman -Q | grep '.\+-git')}"; do
+    scmpkgs=("${scmpkgs[@]}" "${${(s: :)update}[1]}")
+  done
+
+  msg "[AUR] Installed scm packages: ${scmpkgs[*]}"
+
+  if (( ${#ignore} )); then
+    updates=(${scmpkgs:|ignore})
+  fi
+
+  packages=("${packages[@]}" "${scmpkgs[@]}")
+fi
+
+exclude=($(echo $EXCLUDE | tr , " "))
+if (( ${#exclude} )); then
+  msg "[AUR] Excluding Packages: ${exclude[*]}"
+  packages=(${packages:|exclude})
 fi
 
 if [ -z "$packages" ]; then
@@ -393,12 +485,20 @@ if [ -z "$packages" ]; then
   clean_exit
 fi
 
-msg "[AUR] Package set: ${packages[*]}"
+msg "[AUR] Package set (${#packages}): ${packages[*]}"
 
 # Collect package metadata ---------------
 for p in "${packages[@]}"; do
   collect_package "$p"
 done
+
+if (( ${#exclude} )); then
+  all_affected_pkgs="${AFFECTED_PKGS[*]}"
+  AFFECTED_PKGS=(${AFFECTED_PKGS:|exclude})
+  if ! ( "$all_affected_pkgs" = "${AFFECTED_PKGS[*]}" ); then
+    warn "[AUR] Some dependencies have been excluded!"
+  fi
+fi
 
 msg "[AUR] Affected Packages: $AFFECTED_PKGS[@]"
 
@@ -416,6 +516,15 @@ if $LIST_ONLY; then
   clean_exit
 fi
 
+if $ASK; then
+  ans=y
+  ask "[AUR] Continue?" ans
+  if ! [ "$ans" = y -o "$ans" = Y -o "$ans" = YES -o "$ans" = Yes -o "$ans" = yes ]; then
+    err "[AUR] Aborted by user"
+    clean_exit 0
+  fi
+fi
+
 # Fetch packages --------------------------
 for p in "${AFFECTED_PKGS[@]}"; do
   fetch_package "$p"
@@ -423,6 +532,11 @@ done
 
 if $DL_ONLY; then
   clean_exit
+fi
+
+if (( ${#FAILED_PKGS} )); then
+  warn "[AUR]: Failed to fetch packages: ${FAILED_PKGS[*]}"
+  AFFECTED_PKGS=(${AFFECTED_PKGS:|${FAILED_PKGS[@]}})
 fi
 
 # Build packages --------------------------
@@ -443,14 +557,10 @@ touch "$build/aur.sh.running"
 test "$build" = "$PWD" || \
   msg "[AUR] Working in $build."
 
-if ! $ASK; then
+if $NOCONFIRM; then
   msg "[AUR] Updating sudo timestamp"
   sudo -v
-
-  add_makepkg_arg "--noconfirm"
 fi
-
-$ASDEPS && add_makepkg_arg "--asdeps"
 
 msg "[AUR] Makepkg args: ${makepkg_args[*]}"
 
@@ -458,6 +568,12 @@ msg "[AUR] Makepkg args: ${makepkg_args[*]}"
 for p in "${AFFECTED_PKGS[@]}"; do
   build_package "$p"
 done
+
+
+if (( ${#FAILED_PKGS} )); then
+  warn "[AUR] All done, but some packages encountered errors: ${FAILED_PKGS[*]}"
+  clean_exit 255
+fi
 
 msg "[AUR] All Done!"
 
