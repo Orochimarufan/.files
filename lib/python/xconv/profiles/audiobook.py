@@ -33,7 +33,6 @@ from ..profile import *
 @output(container="ogg", ext="ogg")
 @defines(stereo="Use two channels",
          bitrate="Use custom target bitrate",
-         voip="Use voice optimization",
          fancy="Use 48kbps stereo (For dramatic audiobooks with a lot of music and effects)")
 @singleaudio
 def audiobook(task, stream, defines):

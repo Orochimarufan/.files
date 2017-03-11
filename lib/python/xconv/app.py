@@ -115,9 +115,7 @@ def main(argv):
 
         task = SimpleTask(aav, make_outfile(args, profile, args.inputs[0]), profile.container)
 
-        options(task.add_input(tmp.name),
-            f="concat",
-            safe="0")
+        task.add_input(tmp.name).set(f="concat", safe="0")
 
         tasks.append(task)
 
