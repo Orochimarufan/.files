@@ -62,12 +62,15 @@ args = parser.parse_args()
 # Load settings
 fix = {}
 root = os.path.abspath(args.repo or "../Downloads")
-os.chdir(os.path.dirname(args.library))
 
 if os.path.exists(args.library):
     if args.repo:
         print("Error: Cannot use 'repo' argument when updating a library (%s)" % args.library)
         sys.exit(2)
+
+    dirname=os.path.dirname(args.library)
+    if dirname:
+        os.chdir(dirname)
 
     with open(args.library) as f:
         root = f.readline().strip()
@@ -87,6 +90,8 @@ with tempfile.TemporaryDirectory(prefix=".temp-", dir=os.getcwd()) as temp:
     print("=== Analyzing Repo ===")
     # Do work in temporary directory
     for name in os.listdir(root):
+        if name[0] == ".":
+            continue
         path = os.path.join(root, name)
 
         if os.path.isdir(path):
@@ -106,7 +111,7 @@ with tempfile.TemporaryDirectory(prefix=".temp-", dir=os.getcwd()) as temp:
                 cn = epc_re.sub("", f.name)
 
                 m = ep_re.search(cn)
-                if m and not epb_re.search(cn):
+                if False:#m and not epb_re.search(cn):
                     new_name = "%s - E%s" % (series_name, m.group(1))
                 else:
                     cn = stuff_re.sub("", os.path.splitext(f.name)[0]).replace("_", " ").replace(".", " ").strip()
