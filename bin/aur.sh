@@ -495,7 +495,7 @@ done
 if (( ${#exclude} )); then
   all_affected_pkgs="${AFFECTED_PKGS[*]}"
   AFFECTED_PKGS=(${AFFECTED_PKGS:|exclude})
-  if ! ( "$all_affected_pkgs" = "${AFFECTED_PKGS[*]}" ); then
+  if ! [[ "$all_affected_pkgs" == "${AFFECTED_PKGS[*]}" ]]; then
     warn "[AUR] Some dependencies have been excluded!"
   fi
 fi
