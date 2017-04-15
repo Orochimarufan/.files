@@ -1,11 +1,11 @@
 #
 # Executes commands at the start of an interactive session.
 #
-# Authors:
-#   Sorin Ionescu <sorin.ionescu@gmail.com>
 #
 
+#
 # Set the list of directories that Zsh searches for programs.
+#
 fpath=(
   $DOTFILES/zsh/functions
   $fpath
@@ -13,13 +13,16 @@ fpath=(
 
 typeset -gU fpath
 
+#
 # Source Prezto.
+#
 if [[ -s "${ZDOTDIR}/prezto/init.zsh" ]]; then
   source "${ZDOTDIR}/prezto/init.zsh"
 fi
 
-# Customize to your needs...
-
+#
+# Git
+#
 # Revive old gst alias from OMZ/git
 alias gst="git status"
 
@@ -44,8 +47,24 @@ function gupf {
     )
 }
 
-# rsync options
+#
+# SSH
+#
+if (( $+commands[systemctl] )); then
+    eval "$(systemctl --user show-environment | grep '^SSH_AUTH_SOCK=')"
+fi
+if [ -n $SSH_AUTH_SOCK -a -f "$XDG_RUNTIME_DIR/ssh-agent.sock" ]; then
+    SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.sock"
+fi
+export SSH_AUTH_SOCK
+
+#
+# rsync
+#
 alias rsync="rsync -aXzPvihs -e ssh"
 
+#
 # Local overrides
+#
 [[ -e "$DOTFILES/zsh/zshrc.local" ]] && source "$DOTFILES/zsh/zshrc.local"
+
