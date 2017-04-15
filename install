@@ -77,6 +77,7 @@ else
     color 36 echo "  default EMAIL=\"$EMAIL\""
 fi
 
+color 32 echo "  Writing etc/user-info"
 generate "$DOT/etc/user-info" <<EOF
 REALNAME="$REALNAME"
 EMAIL="$EMAIL"
@@ -90,12 +91,31 @@ for file in "$DOT/dotfiles"/*; do
     relink "$file" "$HOME/.$NAM"
 done
 
+# Setup .config
+: ${XDG_CONFIG_HOME:=~/.config}
+msg "Linking .config files... ($XDG_CONFIG_HOME)"
+(
+    cd "$DOT/config"
+    for dir in $(find . -type d); do
+        if [ ! -d "$XDG_CONFIG_HOME/$dir" ]; then
+            color 32 echo "  Creating ${dir:2}"
+            mkdir "$XDG_CONFIG_HOME/$dir"
+        fi
+    done
+    for file in $(find . -type f); do
+        file="${file:2}"
+        color 32 echo "  Adding $file"
+        relink "$DOT/config/$file" "$XDG_CONFIG_HOME/$file"
+    done
+);
+
 # Setup git
 msg "Setting up Git configuration..."
 
 GIT="$DOT/git"
 [[ -e "$HOME/.gitconfig" ]] && ! grep -q ".files/install" "$HOME/.gitconfig" && err "Custom ~/.gitconfig already exists! Please remove it before running .files/install" && exit 1
 
+color 32 echo "  Writing .gitconfig"
 generate "$HOME/.gitconfig" <<EOF
 [include]
     path = $(relpath "$GIT" "$HOME")/config
@@ -107,6 +127,7 @@ cat >>"$HOME/.gitconfig" <<EOF
     path = $(relpath "$GIT" "$HOME")/osx
 EOF
 
+color 32 echo "  Writing git/user-info"
 generate "$GIT/user-info" <<EOF
 [user]
     name = $REALNAME
@@ -117,6 +138,7 @@ EOF
 msg "Setting up ZSH configuration..."
 ZSH="$DOT/zsh"
 
+color 32 echo "  Writing .zshenv"
 generate "$HOME/.zshenv" <<EOF
 export DOTFILES="\$HOME/$(relpath "$DOT" "$HOME")"
 ZDOTDIR="\$DOTFILES/zsh"
@@ -124,17 +146,21 @@ source "\$ZDOTDIR/zshenv"
 EOF
 
 for file in zshrc zpreztorc zlogin zlogout zprofile; do
+    color 32 echo "  Adding .$file"
     relink "$ZSH/$file" "$ZSH/.$file"
 done
 
 relink "$ZSH/prezto" "$ZSH/.zprezto"
 
 # Check login shell
-if echo $SHELL | grep -q zsh; then
+if  getent passwd $(id -un) | grep -q 'zsh$'; then
     msg "Login shell is already set to zsh, you're good to go!"
 else
-    msg "Setting login shell to '/bin/zsh'..."
-    chsh -s "`which zsh`"
-    warn echo "You need to relog to apply shell configuration."
+    msg "Setting login shell to '$(which zsh)'..."
+    chsh -s "$(which zsh)"
 fi
+
+
+warn "You may need to relog for all changes to take effect."
+warn "If you're currently running zsh, you definitely need to at least restart the shell to apply changes."
 
