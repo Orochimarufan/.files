@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+# Depends on 7z in path
+
+import libarchive
+import argparse
+import pathlib
+import os
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(prog=argv[0], description="""
+        Patch a folder structure with files from an archive.
+        This will replace existing files with those of the same name in an archive,
+        with the option to back up the old versions and generate a script to revert the changes.
+    """)
+    parser.add_argument("-p", "--strip", type=int, default=0, help="Strip NUM leading components from archived file names.")
+    parser.add_argument("-C", "--directory", default=".", help="Operate in <direcory>")
+    parser.add_argument("-b", "--backup", default=None, help="Create backup copies of overwritten files")
+    parser.add_argument("-m", "--match", default=None, help="Only extract files matching GLOB", metavar="GLOB")
+    parser.add_argument("-u", "--uninstall-script", default=os.devnull, help="Filename to save an uninstall-scipt to.", metavar="FILE")
+    parser.add_argument("-n", "--dry-run", action="store_true", help="Perform a dry run")
+    parser.add_argument("archive", help="Achive file name")
+
+    return parser.parse_args(argv[1:])
+
+
+def makedirs(path, dryrun=False):
+    if path.is_dir():
+        return set()
+
+    created = set()
+    stack = [path]
+    while stack:
+        path = stack[-1]
+        if path.parent.is_dir():
+            if path.exists():
+                raise IOError("Exists but not a directory: '%s'" % path)
+            if dryrun:
+                return set(stack)
+            os.mkdir(path)
+            created.add(stack.pop())
+        else:
+            stack.append(path.parent)
+
+    return created
+
+
+
+def main(argv):
+    args = parse_args(argv)
+
+    output_path = pathlib.Path(args.directory)
+    backup_path = pathlib.Path(args.backup) if args.backup else None
+
+    folders = set()
+
+    with open(args.uninstall_script, "w") as us:
+        # Uninstall Header
+        if args.uninstall_script != os.devnull:
+            us.write("#!/bin/sh\n"
+                    "# Automated patchdir uninstall script\n"
+                    "# Run from inside patchdir's target directory (-C)\n"
+                    "remove() {\n"
+                    "   echo Removing $1\n"
+                    "   rm \"$1\"\n"
+                    "}\n\n")
+            if backup_path:
+                us.write(("BACKUP_PATH='%s'\n\n"
+                        "restore() {\n"
+                        "   echo Restoring $1 from $BACKUP_PATH\n"
+                        "   mv \"$BACKUP_PATH/$1\" \"$1\"\n"
+                        "}\n\n") % backup_path.relative_to(output_path))
+
+            else:
+                us.write("remove-unsafe() {\n"
+                        "   echo Removing $1\n"
+                        "   rm \"$1\"\n"
+                        "   echo WARNING: Previously existing file $1 is now missing!\n"
+                        "}\n\n")
+
+            us.write("\n# Restore files\n")
+
+        with libarchive.file_reader(args.archive) as archive:
+            for entry in archive:
+                epath = pathlib.PurePath(entry.path)
+                if args.match and not epath.match(args.match):
+                    continue
+                if args.strip:
+                    epath = pathlib.PurePath(*epath.parts[args.strip:])
+                dpath = output_path.joinpath(epath)
+
+                if entry.isdir:
+                    folders |= makedirs(dpath, args.dry_run)
+                else:
+                    folders |= makedirs(dpath.parent, args.dry_run)
+
+                    if dpath.exists():
+                        # Backup
+                        if backup_path:
+                            print("Backing up existing %s" % epath)
+                            bpath = backup_path.joinpath(epath)
+                            folders |= makedirs(bpath.parent, args.dry_run)
+                            if not args.dry_run:
+                                os.rename(dpath, bpath)
+
+                            us.write("restore '%s'\n" % epath)
+                        else:
+                            us.write("remove-unsafe '%s'\n" % epath)
+                    else:
+                        us.write("remove '%s'\n" % epath)
+
+                    print("Extracting %s" % epath)
+
+                    if not args.dry_run:
+                        with open(dpath, "wb") as f:
+                            for chunk in entry.get_blocks():
+                                f.write(chunk)
+
+        if args.uninstall_script != os.devnull and folders:
+            us.write("\n# Remove folders\n")
+
+            for dir in sorted(folders, key=lambda x: len(x.parts), reverse=True):
+                us.write("rmdir '%s'\n" % dir)
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main(sys.argv))
+
