@@ -103,7 +103,7 @@ process_arg() {
     -X|--download-only)
       warn "[AUR] Building was disabled (-X)"
       DL_ONLY=true;;
-    --ask)
+    -a|--ask)
       ASK=true;;
     --aur-host|--exclude) # need more args
       _next_arg="$cx";;
@@ -148,7 +148,7 @@ process_arg() {
       echo "                Set \$MAKEPKG_MAKETHREADS to be used in makepkg.conf"
       echo "                Values prefixed with + or - are added to the number of host cpus"
       echo "  -1            Short for '--threads -1'"
-      echo "  --ask         Review changes before building packages"
+      echo "  -a, --ask     Review changes before building packages"
       echo "  --exclude <pkgs>"
       echo "                Exclude packages from -u"
       echo "  --aur-host <url>"
@@ -500,7 +500,7 @@ if (( ${#exclude} )); then
   fi
 fi
 
-msg "[AUR] Affected Packages: $AFFECTED_PKGS[@]"
+msg "[AUR] Affected Packages (${#AFFECTED_PKGS}): $AFFECTED_PKGS[@]"
 
 # Check version constraints
 for constraint in ${(@kM)PKG_INFO:#*:VersionConstraints:*}; do
@@ -535,7 +535,7 @@ if $DL_ONLY; then
 fi
 
 if (( ${#FAILED_PKGS} )); then
-  warn "[AUR]: Failed to fetch packages: ${FAILED_PKGS[*]}"
+  warn "[AUR]: Failed to fetch packages (${#FAILED_PKGS}): ${FAILED_PKGS[*]}"
   AFFECTED_PKGS=(${AFFECTED_PKGS:|${FAILED_PKGS[@]}})
 fi
 
@@ -571,7 +571,7 @@ done
 
 
 if (( ${#FAILED_PKGS} )); then
-  warn "[AUR] All done, but some packages encountered errors: ${FAILED_PKGS[*]}"
+  warn "[AUR] All done, but some packages encountered errors (${#FAILED_PKGS}: ${FAILED_PKGS[*]}"
   clean_exit 255
 fi
 
