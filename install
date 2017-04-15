@@ -102,12 +102,16 @@ msg "Linking .config files... ($XDG_CONFIG_HOME)"
             mkdir "$XDG_CONFIG_HOME/$dir"
         fi
     done
-    for file in $(find . -type f); do
+    for file in $(find . -type f -o -type l); do
         file="${file:2}"
         color 32 echo "  Adding $file"
-        relink "$DOT/config/$file" "$XDG_CONFIG_HOME/$file"
+        if [[ -L "$file" ]]; then
+            cp "$file" "$XDG_CONFIG_HOME/$file"
+        else
+            relink "$DOT/config/$file" "$XDG_CONFIG_HOME/$file"
+        fi
     done
-);
+)
 
 # Setup git
 msg "Setting up Git configuration..."
