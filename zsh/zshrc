@@ -14,11 +14,17 @@ fpath=(
 typeset -gU fpath
 
 #
-# Source Prezto.
+# Use Antigen
 #
 
-if [[ -s "${ZDOTDIR}/prezto/init.zsh" ]]; then
-  source "${ZDOTDIR}/prezto/init.zsh"
+if [[ -s "$DOTFILES/zsh/antigen/antigen.zsh" ]]; then
+    source "$DOTFILES/zsh/antigen/antigen.zsh"
+
+    antigen use prezto
+
+    antigen bundle nojhan/liquidprompt
+
+    antigen apply
 fi
 
 
