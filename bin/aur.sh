@@ -63,6 +63,7 @@ EXCLUDE=
 ASDEPS=true
 NEEDED=true
 NOCONFIRM=true
+USECUSTOM=true
 
 add_makepkg_arg() {
   makepkg_args=("${makepkg_args[@]}" "$1")
@@ -107,6 +108,8 @@ process_arg() {
       ASK=true;;
     --aur-host|--exclude) # need more args
       _next_arg="$cx";;
+    --no-custom)
+      USECUSTOM=false;;
     -j|--threads)
       _next_arg=--threads;;
     -1)
@@ -151,6 +154,7 @@ process_arg() {
       echo "  -a, --ask     Review changes before building packages"
       echo "  --exclude <pkgs>"
       echo "                Exclude packages from -u"
+      echo "  --no-custom   Don't use custom packages from $CUSTOMDIR"
       echo "  --aur-host <url>"
       echo "                Use a different AUR server. default: https://aur.archlinux.org/"
       echo "  --old-aur     Use the old (non-git) AUR methods"
@@ -314,7 +318,7 @@ collect_package() {
     return 0
   fi
 
-  if [ -e "$CUSTOMDIR/$p" ]; then
+  if $USECUSTOM && [ -e "$CUSTOMDIR/$p" ]; then
     msg "[AUR] Found '$p' in '$CUSTOMDIR', Using that"
     cd "$CUSTOMDIR"
     PKG_INFO[$p:From]="$CUSTOMDIR/$p"
