@@ -16,13 +16,16 @@ typeset -gU fpath
 #
 # Source Prezto.
 #
+
 if [[ -s "${ZDOTDIR}/prezto/init.zsh" ]]; then
   source "${ZDOTDIR}/prezto/init.zsh"
 fi
 
+
 #
 # Git
 #
+
 # Revive old gst alias from OMZ/git
 alias gst="git status"
 
@@ -47,31 +50,26 @@ function gupf {
     )
 }
 
-#
-# SSH
-#
-if (( $+commands[systemctl] )); then
-    eval "$(systemctl --user show-environment | grep '^SSH_AUTH_SOCK=')"
-fi
-if [ -n $SSH_AUTH_SOCK -a -f "$XDG_RUNTIME_DIR/ssh-agent.sock" ]; then
-    SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.sock"
-fi
-export SSH_AUTH_SOCK
 
 #
 # rsync
 #
+
 alias rsync="rsync -aXzPvihs -e ssh"
+
 
 #
 # NeoVim
 #
+
 if (( $+commands[nvim] )); then
     alias vim=nvim
 fi
 
+
 #
 # Local overrides
 #
+
 [[ -e "$DOTFILES/zsh/zshrc.local" ]] && source "$DOTFILES/zsh/zshrc.local"
 

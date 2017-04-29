@@ -1,3 +1,4 @@
+# vim: ft=sh
 #
 # Executes commands in every top-level shell
 #
@@ -26,15 +27,23 @@
 #
 
 if [[ "$OSTYPE" == darwin* ]]; then
-  export BROWSER='open'
+    export BROWSER=open
+elif (( $+commands[xdg-open] )); then
+    export BROWSER=xdg-open
 fi
 
 #
 # Editors
 #
 
-export EDITOR='vim'
-export VISUAL='vim'
+if (( $+commands[nvim] )); then
+    export EDITOR=nvim
+    export VISUAL=nvim
+else
+    export EDITOR=vim
+    export VISUAL=vim
+fi
+
 export PAGER='less'
 
 #
@@ -75,6 +84,7 @@ typeset -gU cdpath fpath mailpath path pythonpath
 # zsh only maps the array and text versions for PATH
 export PYTHONPATH="${(j|:|)pythonpath}"
 
+
 #
 # Less
 #
@@ -103,11 +113,37 @@ if [[ ! -d "$TMPPREFIX" ]]; then
   mkdir -p "$TMPPREFIX"
 fi
 
+
+#
+# SSH
+#
+
+if (( $+commands[systemctl] )); then
+    eval "$(systemctl --user show-environment | grep '^SSH_AUTH_SOCK=')"
+fi
+if [ -n $SSH_AUTH_SOCK -a -f "$XDG_RUNTIME_DIR/ssh-agent.sock" ]; then
+    SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.sock"
+fi
+export SSH_AUTH_SOCK
+
+
+#
 # Arch Build system
+#
+
 export ASPROOT=$HOME/aur/ABS/.asp
 
+
+#
 # LaTeX
+#
+
 export TEXMFHOME=$DOTFILES/texmf
 
+
+#
 # Local overrides
+#
+
 [[ -e "$DOTFILES/zsh/zprofile.local" ]] && source "$DOTFILES/zsh/zprofile.local"
+
