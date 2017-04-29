@@ -14,17 +14,19 @@ fpath=(
 typeset -gU fpath
 
 #
-# Use Antigen
+# Use zplug
 #
 
-if [[ -s "$DOTFILES/zsh/antigen/antigen.zsh" ]]; then
-    source "$DOTFILES/zsh/antigen/antigen.zsh"
+export ZPLUG_HOME=$DOTFILES/zsh/zplug
+if [[ -s "$ZPLUG_HOME/init.zsh" ]]; then
+    source "$ZPLUG_HOME/init.zsh"
 
-    antigen use prezto
+    zplug "sorin-ionescu/prezto", as:plugin, use:init.zsh
 
-    antigen bundle nojhan/liquidprompt
+    zplug "nojhan/liquidprompt", as:plugin
 
-    antigen apply
+    zplug check || zplug install
+    zplug load
 fi
 
 
