@@ -13,11 +13,14 @@ fpath=(
 
 typeset -gU fpath
 
+
 #
 # Use zplug
 #
-
 export ZPLUG_HOME=$DOTFILES/zsh/zplug
+if (( $+commands[termux-info] )); then
+    rm $ZPLUG_HOME/zcompdump # Broken in Termux
+fi
 if [[ -s "$ZPLUG_HOME/init.zsh" ]]; then
     source "$ZPLUG_HOME/init.zsh"
 
@@ -62,22 +65,37 @@ function gupf {
 #
 # rsync
 #
-
 alias rsync="rsync -aXzPvihs -e ssh"
 
 
 #
 # NeoVim
 #
-
 if (( $+commands[nvim] )); then
     alias vim=nvim
 fi
 
 
 #
-# Local overrides
+# BusyBox
 #
 
+# Kill fancy aliases on BusyBox, since not all GNU options are supported
+if (( $+commands[busybox] )); then
+    for cmd in `busybox --list`; do
+        if (( $+aliases[$cmd] )); then
+            __whence="`builtin whence -p $cmd`"
+            if [ -L "$__whence" ] && command readlink "$__whence" | command grep -q busybox; then
+                unalias $cmd
+            fi
+        fi
+        unset __whence
+    done
+fi
+
+
+#
+# Local overrides
+#
 [[ -e "$DOTFILES/zsh/zshrc.local" ]] && source "$DOTFILES/zsh/zshrc.local"
 

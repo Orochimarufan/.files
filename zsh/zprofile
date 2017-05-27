@@ -1,4 +1,4 @@
-# vim: ft=sh
+# vim: ft=zsh
 #
 # Executes commands in every top-level shell
 #
@@ -25,17 +25,18 @@
 #
 # Browser
 #
-
 if [[ "$OSTYPE" == darwin* ]]; then
     export BROWSER=open
+elif (( $+commands[termux-open] )); then
+    export BROWSER=termux-open
 elif (( $+commands[xdg-open] )); then
     export BROWSER=xdg-open
 fi
 
+
 #
 # Editors
 #
-
 if (( $+commands[nvim] )); then
     export EDITOR=nvim
     export VISUAL=nvim
@@ -46,13 +47,34 @@ fi
 
 export PAGER='less'
 
+
 #
 # Language
 #
-
 if [[ -z "$LANG" ]]; then
   export LANG='en_US.UTF-8'
 fi
+
+
+#
+# Termux
+#
+if (( $+commands[termux-info] )); then
+    export TMPDIR="$PREFIX/tmp"
+fi
+
+
+#
+# Terminfo
+#
+if [[ ! -f "${PREFIX:-/usr}/share/terminfo/${TERM:0:1}/$TERM" ]]; then
+    if [[ "${TERM:0:7}" == "konsole" ]] || echo $TERM | grep -q 256color; then
+        export TERM=xterm-256color
+    else
+        export TERM=xterm
+    fi
+fi
+
 
 #
 # Paths
@@ -99,10 +121,10 @@ if (( $+commands[lesspipe.sh] )); then
   export LESSOPEN='| /usr/bin/env lesspipe.sh %s 2>&-'
 fi
 
+
 #
 # Temporary Files
 #
-
 if [[ ! -d "$TMPDIR" ]]; then
   export TMPDIR="/tmp/$UID"
   mkdir -p -m 700 "$TMPDIR"
@@ -117,7 +139,6 @@ fi
 #
 # SSH
 #
-
 if (( $+commands[systemctl] )); then
     eval "$(systemctl --user show-environment | grep '^SSH_AUTH_SOCK=')"
 fi
@@ -130,20 +151,19 @@ export SSH_AUTH_SOCK
 #
 # Arch Build system
 #
-
-export ASPROOT=$HOME/aur/ABS/.asp
+if [ -f /etc/arch-release ]; then
+    export ASPROOT=$HOME/aur/ABS/.asp
+fi
 
 
 #
 # LaTeX
 #
-
 export TEXMFHOME=$DOTFILES/texmf
 
 
 #
 # Local overrides
 #
-
 [[ -e "$DOTFILES/zsh/zprofile.local" ]] && source "$DOTFILES/zsh/zprofile.local"
 
