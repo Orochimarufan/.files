@@ -77,18 +77,6 @@ def description(desc):
     return apply
 
 
-def output(container=None, ext=None):
-    """ Add output file information """
-    def apply(f):
-        if container:
-            f.container = container
-            f.ext = "mkv" if container == "matroska" else container
-        if ext:
-            f.ext = ext
-        return f
-    return apply
-
-
 def defines(**defs):
     """ Document supported defines with description """
     def apply(f):
@@ -98,11 +86,30 @@ def defines(**defs):
 
 
 def features(**features):
-    """ Set opaque feature flags """
+    """
+    Set opaque feature flags
+
+    Boolean flags are checked for existance, not actual value.
+
+    Known flags:
+    - output: Specifies type of the output file [(format, file-extension)]
+    - argshax: Pass parsed cmdline arguments in 'args' kwd
+    - singleaudio: Indicates that it operates on a single audio stream. No effects
+    - no_single_output: Profile doesn't constitute a 1:1 file conversion. Don't use SimpleTask
+    - advanced_task: reserved
+    """
     def apply(f):
         __update(f, "features", features)
         return f
     return apply
+
+
+def output(container=None, ext=None):
+    """ Add output file information """
+    return features(output=(
+        container,
+        ext if ext else "mkv" if container == "matroska" else container
+    ))
 
 
 def singleaudio(profile):

@@ -22,43 +22,24 @@ xconv ffmpeg wrapper based on AdvancedAV
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 -----------------------------------------------------------
-Opus Audiobook profile
+Opus Audiobook profile from m4b chapters
 """
 
 from ..profile import *
-
-
-abdefines = dict(
-    stereo="Use two channels at 48k",
-    bitrate="Use custom target bitrate",
-    fancy="Use 56kbps stereo (For dramatic audiobooks with a lot of music and effects)"
-)
-
-def apply(stream, defines):
-    stream.set(codec="libopus",
-            vbr="on",
-            b="40k",
-            ac="1",
-            application="voip")
-    if stream.source.channels > 1:
-        if "stereo" in defines:
-            stream.set(ac="2",
-                    b="48k")
-        if "fancy" in defines:
-            stream.set(ac="2",
-                    b="56k",
-                    application="audio")
-    if "bitrate" in defines:
-        stream.bitrate = defines["bitrate"]
-    # At most input bitrate; we wouldn't gain anything since opus should be same or better compression
-    stream.bitrate = min(stream.bitrate, stream.source.bitrate)
+from .audiobook import apply, abdefines
 
 
 @profile
-@description("Encode Opus Audiobook")
+@description("Split & Encode Opus Audiobook from M4B chapters")
 @output(container="ogg", ext="ogg")
+@features(no_single_output=True)
 @defines(**abdefines)
 @singleaudio
-def audiobook(task, stream, defines):
-    apply(task.map_stream(stream), defines)
+def audiobook_from_chapters(task, stream, defines):
+    for chapter in task.iter_chapters():
+        apply(
+            task.add_output(chapter.title + ".ogg", "ogg")
+            .set(ss=chapter.start_time,
+                 to=chapter.end_time)
+            .map_stream(stream), defines)
     return True

@@ -22,43 +22,20 @@ xconv ffmpeg wrapper based on AdvancedAV
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 -----------------------------------------------------------
-Opus Audiobook profile
+Extract subtitle streams
 """
 
 from ..profile import *
 
 
-abdefines = dict(
-    stereo="Use two channels at 48k",
-    bitrate="Use custom target bitrate",
-    fancy="Use 56kbps stereo (For dramatic audiobooks with a lot of music and effects)"
-)
-
-def apply(stream, defines):
-    stream.set(codec="libopus",
-            vbr="on",
-            b="40k",
-            ac="1",
-            application="voip")
-    if stream.source.channels > 1:
-        if "stereo" in defines:
-            stream.set(ac="2",
-                    b="48k")
-        if "fancy" in defines:
-            stream.set(ac="2",
-                    b="56k",
-                    application="audio")
-    if "bitrate" in defines:
-        stream.bitrate = defines["bitrate"]
-    # At most input bitrate; we wouldn't gain anything since opus should be same or better compression
-    stream.bitrate = min(stream.bitrate, stream.source.bitrate)
-
-
 @profile
-@description("Encode Opus Audiobook")
-@output(container="ogg", ext="ogg")
-@defines(**abdefines)
-@singleaudio
-def audiobook(task, stream, defines):
-    apply(task.map_stream(stream), defines)
+@description("Extract subtitle tracks")
+@defines(format="Convert all subtitles to a specific format")
+@features(no_single_output=True)
+def getsubs(task, defines):
+    for stream in task.iter_subtitle_streams():
+        of = task.add_output("%s.%s.%s" % (task.output_basename, task.inputs.index(stream.file), stream.stream_spec), None) # TODO get real file extension
+        os = of.map_stream(stream)
+        if "format" in defines:
+        	os.codec = defines["format"]
     return True

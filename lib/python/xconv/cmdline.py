@@ -51,7 +51,7 @@ class ProfilesAction(TerminalAction):
     def run(self, parser):
         print("Available Profiles:")
         for name, profile in sorted(load_all_profiles().items()):
-            print("  %-20s %s" % (name, profile.description if profile.description else ""))
+            print("  %-25s %s" % (name, profile.description if profile.description else ""))
 
 
 class ProfileInfoAction(TerminalAction):
@@ -62,13 +62,15 @@ class ProfileInfoAction(TerminalAction):
         print("Profile '%s':" % profile_name)
         if profile.description:
             print("  Description: %s" % profile.description)
-        output_info = []
-        if profile.container:
-            output_info.append("Format: %s" % profile.container)
-        if profile.ext:
-            output_info.append("File extension: %s" % profile.ext)
-        if output_info:
-            print("  Output: %s" % "; ".join(output_info))
+        if "output" in profile.features:
+            output = profile.features["output"]
+            output_info = []
+            if output[0]:
+                output_info.append("Format: %s" % output[0])
+            if output[1]:
+                output_info.append("File extension: %s" % output[0])
+            if output_info:
+                print("  Output: %s" % "; ".join(output_info))
         if profile.features:
             print("  Flags: %s" % ", ".join("%s(%r)" % (k, v) if v is not None else k for k, v in profile.features.items()))
         if profile.defines:

@@ -50,15 +50,58 @@ class SimpleTask(advancedav.SimpleTask):
     output_factory = OutputFile
 
 
+class AdvancedTask(advancedav.Task):
+    output_factory = OutputFile
+
+    def __init__(self, aav, basename):
+        self.output_basename = basename
+        super().__init__(aav)
+
+
 # == App ==
-def make_outfile(args, profile, infile):
-    if not args.output_filename:
-        if hasattr(profile, "ext"):
-            return build_path(args.output_directory, ".".join((splitext(basename(infile))[0], profile.ext if profile.ext else "bin")))
-        else:
-            return build_path(args.output_directory, basename(infile))
+def make_basename(path, infile):
+    return build_path(path, splitext(basename(infile))[0])
+
+
+def make_outfile(path, infile, ext=None):
+    name, oldext = splitext(basename(infile))
+    return build_path(path, ".".join((name, ext if ext else oldext)))
+
+
+def create_task(aav, profile, inputs, args, filename_from=None):
+    is_advanced_task_profile = any(("advanced_task" in profile.features,
+                                    "no_single_output" in profile.features))
+
+    filename_from = filename_from or inputs[0]
+
+    if not is_advanced_task_profile:
+        fmt = advancedav.DEFAULT_CONTAINER
+        ext = None
+        if "output" in profile.features:
+            fmt, ext = profile.features["output"]
+        outfile = args.output if args.output_filename else make_outfile(args.output_directory, filename_from, ext)
+        task = SimpleTask(aav, outfile, fmt)
+
     else:
-        return args.output
+        basename = args.output if args.output_filename else make_basename(args.output_directory, filename_from)
+        task = AdvancedTask(aav, basename)
+
+
+    for input in inputs:
+        task.add_input(input)
+
+    return task
+
+
+def task_name(task):
+    if hasattr(task, "name"):
+        return basename(task.name)
+    elif task.inputs:
+        return "<%s" % task.inputs[0].name
+    elif task.outputs:
+        return ">%s" % task.outputs[0].name
+    else:
+        return "(anon task %p)" % id(task)
 
 
 def main(argv):
@@ -95,12 +138,7 @@ def main(argv):
     print("\033[35mCollecting Tasks..\033[0m")
 
     if args.merge:
-        task = SimpleTask(aav, make_outfile(args, profile, args.inputs[0]), profile.container)
-
-        for input in args.inputs:
-            task.add_input(input)
-
-        tasks.append(task)
+        tasks.append(create_task(aav, profile, args.inputs, args))
 
     elif args.concat:
         import tempfile, os
@@ -113,7 +151,7 @@ def main(argv):
                 print("\033[36m  Concatenating %s\033[0m" % basename(f))
                 tmp.write("file '%s'\n" % f)
 
-        task = SimpleTask(aav, make_outfile(args, profile, args.inputs[0]), profile.container)
+        task = create_task(aav, profile, (), args, filename_from=args.inputs[0])
 
         task.add_input(tmp.name).set(f="concat", safe="0")
 
@@ -121,12 +159,7 @@ def main(argv):
 
     else:
         for input in args.inputs:
-            out = make_outfile(args, profile, input)
-            if args.update and exists(out):
-                continue
-            task = SimpleTask(aav, out, profile.container)
-            task.add_input(input)
-            tasks.append(task)
+            tasks.append(create_task(aav, profile, (input,), args))
 
     print("\033[35mPreparing Tasks..\033[0m")
 
@@ -140,17 +173,26 @@ def main(argv):
 
     # Apply profile
     for task in tasks:
-        print("\033[32m  Applying profile for '%s'\033[0m" % basename(task.name), end="\033[K\r")
+        print("\033[32m  Applying profile for '%s'\033[0m" % task_name(task), end="\033[K\r")
         res = profile(task, **pkw)
         if not res:
-            print("\033[31m  Failed to apply profile for '%s'\033[0m\033[K" % basename(task.name))
+            print("\033[31m  Failed to apply profile for '%s'\033[0m\033[K" % task_name(task))
             return 1
+
+    if args.update:
+        for task in tasks[:]:
+            for output in [o for o in task.outputs if exists(o.name)]:
+                print("\033[33m  Skipping existing '%s' (--update)\033[0m\033[K" % basename(skip.name))
+                task.outputs.remove(skip)
+            if not tasks.outputs:
+                print("\033[33m  Skipping task '%s' because no output files are left\033[0m\033[K" % task_name(task))
+                tasks.remove[task]
 
     print("\033[35mExecuting Tasks..\033[0m\033[K")
 
     # Commit
     for task in tasks:
-        print("\033[32m  Processing '%s'\033[0m" % basename(task.name))
+        print("\033[32m  Processing '%s'\033[0m" % task_name(task))
         task.commit()
 
     # Clean up
