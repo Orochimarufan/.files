@@ -9,6 +9,7 @@ import itertools
 import functools
 import logging
 import argparse
+import collections
 
 
 logger = logging.getLogger("AnimeImport")
@@ -65,6 +66,7 @@ def make_symlink_in(target, in_directory, linkname, anchor=None):
         os.symlink(transport_path(target, anchor if anchor else os.curdir, in_directory),
                    os.path.join(in_directory, linkname))
 
+
 def clean_links(path):
     for f in os.listdir(path):
         if not f.startswith(".") and os.path.islink(os.path.join(path, f)):
@@ -85,8 +87,12 @@ def opt_value_str(o):
         return str(o)
 
 
-def natural_sort_key(s, _nsre=re.compile(r'(\d+)')):
+def natural_sort_key(s, *, _nsre=re.compile(r'(\d+)')):
     return [int(text) if text.isdigit() else text.lower() for text in _nsre.split(s)]
+
+
+def natural_name_sort_key(f, *, _nsre=re.compile(r'(\d+)')):
+    return [int(text) if text.isdigit() else text.lower() for text in _nsre.split(f.name)]
 
 
 ###############################################################################
@@ -231,8 +237,10 @@ class Importer:
         Special.simple("Ending", r"[_ ]((NC|TV)?ED|Ending|Closing)[ _]?(?P<ep>\d+)"),
         Special.simple("Special", r"[_ ](Special|OVA|SP)[ _]?(?P<ep>\d+)?[ _]?"),
         # .nfo files
-        Special({"$custom": lambda m, i: ("link", os.path.join(i.destination, i.main_name + ".nfo"))}, re.compile(r".nfo$"))
+        Special({"$custom": lambda m, i: ("link", i.destination, i.main_name + ".nfo")}, re.compile(r".nfo$"))
     ]
+
+    log_skip = False
 
     link_template = "{series} S{season:d}E{episode:03d}"
     until_template = "-E{episode:03d}"
@@ -259,6 +267,8 @@ class Importer:
 
         self.destination = os.path.abspath(destination)
         self.main_name = os.path.basename(self.destination)
+
+        self.library_path = os.path.normpath(os.path.join(self.destination, ".."))
 
         def get_source_loc(fn):
             source = os.readlink(fn)
@@ -374,7 +384,44 @@ class Importer:
     def option(self, name):
         return self.options[name] if name in self.options else self.default_options.get(name, None)
 
+    def reset(self, *things):
+        if "pattern" in things:
+            self.pattern = self.default_pattern
+        if "exclude" in things:
+            self.exclude = None
+        if "specials" in things:
+            self.specials.clear()
+        if "options" in things:
+            self.options.clear()
+
+    def print_info(self):
+        print("Series Info for %s:" % self.main_name)
+        print("-" * (17 + len(self.main_name)))
+        print("Sources    |  %s" % ("\n           |  ".join(self.sources)))
+        print("Pattern    |  r'%s'%s" % (self.pattern.pattern, " (default)" if self.pattern is self.default_pattern else ""))
+        print("Exclude    |  %s" % (("r'%s'" % self.exclude.pattern) if self.exclude else "None"))
+        print("Options    |  %s" % self.options)
+        print("Specials   |  %s" % ("None"
+                                      if not self.specials else
+                                      "\n           |  ".join("%-35s :: %s" % ("r'%s'" % special.pattern.pattern, special._properties)
+                                                                for special in self.specials)))
+
+    @property
+    def flags(self):
+        return "".join((f for c, f in [
+            (self.pattern is not self.default_pattern, "p"),
+            (self.exclude, "e"),
+            #(self.option("exclude_parts"), "d"),
+            (not self.option("exclude_parts"), "D"),
+            (self.option("auto_specials"), "i"),
+            (not self.option("auto_specials"), "I"),
+            (self.specials, str(len(self.specials))),
+        ] if c))
+
     def process_file(self, filename, subdir=None):
+        """
+        This is the magic that decides if and where to link to a specific source file.
+        """
         # Exclude
         if self.option("exclude_parts") and filename.endswith(".part"):
             return "skip", "partial download"
@@ -403,7 +450,7 @@ class Importer:
 
                 if special.is_extern:
                     name = special.name
-                    linkpath = os.path.join(self.destination, "..", name)
+                    linkpath = os.path.join(self.library_path, name)
                 else:
                     name = self.main_name
 
@@ -440,7 +487,7 @@ class Importer:
             linkname = self.format_linkname(**data)
             self.last_episode = (data["until_ep"] if "until_ep" in data else data["episode"])
 
-        return "link", os.path.join(linkpath, linkname + os.path.splitext(filename)[1])
+        return "link", linkpath, linkname + os.path.splitext(filename)[1]
 
     def clean_all(self):
         clean_links(self.destination)
@@ -449,77 +496,104 @@ class Importer:
             if special.is_extern:
                 clean_links(os.path.join(self.destination, "..", special.name))
 
-    def run(self, *, dry=False):
-        if not dry:
-            self.clean_all()
-
+    def collect(self):
+        """
+        Collect operations
+        """
         self.last_episode = 0 # FIXME: global state is bad
         self.last_special = {}
 
         for source in self.sources:
-            for f in sorted(os.listdir(source), key=natural_sort_key):
-                path = os.path.join(source, f)
-
-                if os.path.isdir(path):
-                    if self.specials:
-                        for ff in sorted(os.listdir(path), key=natural_sort_key):
-                            if self.handle_file(source, os.path.join(f, ff), *self.process_file(ff, subdir=f), dry=dry) != 0:
-                                return 1
+            for f in sorted(os.scandir(source), key=natural_name_sort_key):
+                if f.is_dir():
+                    for ff in sorted(os.scandir(f.path), key=natural_name_sort_key):
+                        yield (ff.path, *self.process_file(ff.name, subdir=f.name))
                 else:
-                    if self.handle_file(source, f, *self.process_file(f), dry=dry) != 0:
-                        return 1
+                    yield (f.path, *self.process_file(f.name))
 
-    def handle_file(self, source, f, what, where, *, dry=False):
-        if what == "link":
-            if os.path.exists(where) and not dry:
-                logger.error("LINK %s => %s exists!" % (f, os.path.basename(where)))
-                return 1
+    def build_vtree(self):
+        """
+        Build a virtual tree of links
+        """
+        dirs = collections.defaultdict(dict)
+
+        self.skipped = []
+
+        for src, op, *args in self.collect():
+            if op == "skip":
+                if self.log_skip:
+                    logger.info("Skipped %s (%s)" % (os.path.basename(src), args[0]))
+                self.skipped.append(src)
+            elif op == "link":
+                dirname, linkname = args
+                dirs[dirname][linkname] = os.path.relpath(src, dirname)
             else:
-                logger.info("LINK %s => %s" % (f, os.path.basename(where)))
+                raise ValueError("Collected unknown operation '%s'" % op)
 
-            if not dry:
-                make_symlink(os.path.join(source, f), where)
+        return dirs
 
-        elif what == "skip":
-            logger.info("SKIP %s (%s)" % (f, where))
+    def build_fstree(self, dirpaths=None):
+        """
+        Build a tree from existing links
+        """
+        if dirpaths is None:
+            dirpaths = [self.destination] + [os.path.join(self.library_path, special.name)
+                                                for special in self.effective_specials
+                                                if special.is_extern]
+        dirs = {}
 
-        else:
-            assert(False and "Should not be reached")
+        for dirpath in dirpaths:
+            dc = dirs[dirpath] = {}
+            for f in os.scandir(dirpath):
+                if f.name[0] != "." and f.is_symlink():
+                    dc[f.name] = os.readlink(f.path)
 
-        return 0
+        return dirs
 
-    def reset(self, *things):
-        if "pattern" in things:
-            self.pattern = self.default_pattern
-        if "exclude" in things:
-            self.exclude = None
-        if "specials" in things:
-            self.specials.clear()
-        if "options" in things:
-            self.options.clear()
+    DIFF_SAME   = 0
+    DIFF_MINUS  = 1
+    DIFF_PLUS   = 2
 
-    def print_info(self):
-        print("Series Info for %s:" % self.main_name)
-        print("-" * (17 + len(self.main_name)))
-        print("Sources    |  %s" % ("\n           |  ".join(self.sources)))
-        print("Pattern    |  r'%s'%s" % (self.pattern.pattern, " (default)" if self.pattern is self.default_pattern else ""))
-        print("Exclude    |  %s" % (("r'%s'" % self.exclude.pattern) if self.exclude else "None"))
-        print("Options    |  %s" % self.options)
-        print("Specials   |  %s" % ("None"
-                                      if not self.specials else
-                                      "\n           |  ".join("%-35s :: %s" % ("r'%s'" % special.pattern.pattern, special._properties)
-                                                                for special in self.specials)))
+    def diff(self):
+        diff = {}
 
-    def flags(self):
-        return "".join((f for c, f in [
-            (self.pattern is not self.default_pattern, "p"),
-            (self.exclude, "e"),
-            #(self.option("exclude_parts"), "d"),
-            (not self.option("exclude_parts"), "D"),
-            (self.option("auto_specials"), "i"),
-            (not self.option("auto_specials"), "I"),
-            (self.specials, str(len(self.specials))),
-        ] if c))
+        wtree = self.build_vtree()
+        htree = self.build_fstree()
+
+        for dirpath in set(wtree.keys()) | set(htree.keys()):
+            wdir = wtree[dirpath] if dirpath in wtree else {}
+            hdir = htree[dirpath] if dirpath in htree else {}
+
+            wfiles = set(wdir.keys())
+            hfiles = set(hdir.keys())
+            bfiles = wfiles & hfiles
+            sfiles = {f for f in bfiles if wdir[f] == hdir[f]} # Anchors must be the same in wtree and htree fir relatve paths!!
+            cfiles = (bfiles - sfiles)
+
+            ddir = diff[dirpath] = {}
+            ddir[self.DIFF_SAME] = {f: wdir[f] for f in sfiles}
+            ddir[self.DIFF_MINUS] = {f: hdir[f] for f in (cfiles | (hfiles - wfiles))}
+            ddir[self.DIFF_PLUS] = {f: wdir[f] for f in (cfiles | (wfiles - hfiles))}
+
+        return diff
+
+    def run(self, *, dry=False):
+        """
+        Update this library entry
+        """
+        for path, diff in self.diff().items():
+            for f, target in diff[self.DIFF_MINUS].items():
+                # Check if target still matches?
+                logger.info("Remove %s (%s)" % (f, os.path.basename(target)))
+                if not dry:
+                    os.unlink(os.path.join(path, f))
+            for f, target in diff[self.DIFF_PLUS].items():
+                logger.info("Link %s => %s" % (f, os.path.basename(target)))
+                lpath = os.path.join(path, f)
+                if os.path.exists(lpath):
+                    raise FileExistsError("File %s already exists" % f)
+                if not dry:
+                    os.symlink(target, lpath)
 
 
 ###############################################################################
@@ -528,6 +602,7 @@ class Importer:
 class HelpFormatter(argparse.RawTextHelpFormatter):
     def __init__(self, prog):
         super().__init__(prog, max_help_position=16)
+
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(prog=argv[0], formatter_class=HelpFormatter)
@@ -689,6 +764,7 @@ def do_interactive_import(args, sources):
         if not args.no_update:
             run_update(i, args)
 
+
 # Command Mains
 def import_main(args):
     i = get_series_importer(args)
@@ -782,7 +858,7 @@ def update_main(args):
     fin_dirs = set()
 
     for i in get_series_importers(args, args.series):
-        logger.info("Processing '%s' (%s)" % (i.main_name, i.flags()))
+        logger.info("Processing '%s' (%s)" % (i.main_name, i.flags))
 
         if i.destination in fin_dirs:
             logger.info("Already processed '%s'. Skipping" % i.main_name)
