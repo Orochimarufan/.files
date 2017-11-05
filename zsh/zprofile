@@ -1,25 +1,20 @@
 # vim: ft=zsh
 #
-# Executes commands in every top-level shell
+# Executes commands in every top-level or login shell
 #
-# ATTENTION: This differs from usual zsh behaviour!
-#            Treat this file as a per-session zshenv instead.
+# ATTENTION: This differs from usual zsh behaviour! In addition to traditional
+#            login shells, this is also sourced by any top-level ($SHLVL=1)
+#            non-login shells. (In the latter case, from zshenv)
 #
-# Why is this useful? Because it only gets executed once for any given tree
-# of zsh-processes. You can use it to do environment computations that would
-# be too expensive for zshenv.
+# This is useful because it only gets executed once for any given tree
+# of zsh-processes, saving resources on sub-shell invocation while still
+# providing a consistent environment in login and non-login shells.
 #
 # Then why also source it in non-interactive shells?
 # Because it prevents desync between scripts and interactive prompts.
 # Ever tried to debug a script and ended up with "But it works in the prompt!"?
 #
-# That is especially true with X11-Scenarios, since a display-manager usually
-# doesn't source any profile. Which will lead to shells without a login shell in
-# their parent process tree, which means the profile is basically useless.
-#
-# If you need loginshell-only commands, use zlogin instead. If you insist on
-# zprofile, create a .zprofile (note the dot) file in this directory and zsh will
-# treat it as always.
+# For code intended for login shells only, use zlogin instead.
 #
 
 #

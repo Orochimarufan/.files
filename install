@@ -161,7 +161,8 @@ color 32 echo "  Writing .zshenv"
 generate "$HOME/.zshenv" <<EOF
 export DOTFILES="\$HOME/$(relpath "$DOT" "$HOME")"
 ZDOTDIR="\$DOTFILES/zsh"
-source "\$ZDOTDIR/zshenv"
+[[ -f "\$ZDOTDIR/zshenv" ]] && source "\$ZDOTDIR/zshenv"
+[[ ! -o LOGIN && "\$SHLVL" == 1 && -f "\$ZDOTDIR/zprofile" ]] && source "\$ZDOTDIR/zprofile"
 EOF
 
 for file in zshrc zpreztorc zlogin zlogout zprofile; do
