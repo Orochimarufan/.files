@@ -391,7 +391,9 @@ collect_package() {
     done
   fi
 
-  AFFECTED_PKGS=("${AFFECTED_PKGS[@]}" "$p")
+  if ! (( $AFFECTED_PKGS[(I)$p] )); then # Don't add split packages depending on themselves multiple times. FIXME: Properly handle cycles
+    AFFECTED_PKGS=("${AFFECTED_PKGS[@]}" "$p")
+  fi
 }
 
 # Package processing

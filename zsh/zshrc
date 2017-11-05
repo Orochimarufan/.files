@@ -65,7 +65,7 @@ function gupf {
 #
 # rsync
 #
-alias rsync="rsync -aXzPvihs -e ssh"
+alias rsync="rsync -aXzzPvihs -e ssh"
 
 
 #
@@ -92,6 +92,11 @@ if (( $+commands[busybox] )); then
         unset __whence
     done
 fi
+
+#
+# Misc.
+#
+alias lns="ln -sr"
 
 
 #
