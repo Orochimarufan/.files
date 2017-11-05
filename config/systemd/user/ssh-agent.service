@@ -4,9 +4,9 @@ Description=SSH publickey authentication agent
 [Service]
 Type=simple
 Environment=SSH_AUTH_SOCK=%t/ssh-agent.sock
-ExecStart=/usr/bin/ssh-agent -D -a ${SSH_AUTH_SOCK}
+ExecStart=/usr/bin/ssh-agent -D -a ${SSH_AUTH_SOCK} -t 2h
 ExecStartPost=/usr/bin/systemctl --user set-environment SSH_AUTH_SOCK=${SSH_AUTH_SOCK}
-ExecStopPre=/usr/bin/systemctl --user unset-environment SSH_AUTH_SOCK=${SSH_AUTH_SOCK}
+ExecStopPost=/usr/bin/systemctl --user unset-environment SSH_AUTH_SOCK=${SSH_AUTH_SOCK}
 
 [Install]
 WantedBy=default.target

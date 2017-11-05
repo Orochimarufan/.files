@@ -1,0 +1,5 @@
+#!/bin/sh
+
+echo Starting systemd user units
+systemctl --user enable --now ssh-agent
+
