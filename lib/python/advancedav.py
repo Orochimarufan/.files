@@ -116,7 +116,7 @@ class Future:
     def __enter__(self):
         return self.complete
 
-    def __exit__(self, exc):
+    def __exit__(self, tp, exc, tb):
         if not self.finished:
             if exc:
                 self.fail(exc)
