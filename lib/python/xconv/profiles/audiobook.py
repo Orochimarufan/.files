@@ -72,7 +72,7 @@ def apply_stream(stream, defines):
 @defines(**abdefines)
 @singleaudio
 def audiobook(task, stream, defines):
-    if "ogg" in "defines":
+    if "ogg" in defines:
         task.change_format(ext="ogg")
 
     apply_stream(task.map_stream(stream), defines)
