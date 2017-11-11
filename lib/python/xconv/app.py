@@ -33,6 +33,7 @@ from os.path import isdir, join as build_path, basename, dirname, splitext, exis
 from os import environ, makedirs, mkdir
 from shutil import copyfile
 from pathlib import Path
+from functools import partial
 
 
 # == Extend AAV ==
@@ -62,8 +63,21 @@ class AdvancedTask(advancedav.Task):
 
 class Manager(advancedav.MultiAV):
     def _spawn_next(self, **b):
-        print("\033[32m  Processing '%s'\033[0m" % task_name(self.queue[0][1]))
-        return super()._spawn_next(**b)
+        task = self.queue[0][1]
+
+        print("\033[32m  Processing '%s'\033[0m" % task_name(task))
+
+        proc, f = super()._spawn_next(**b)
+
+        f.then(partial(task_done, task)).catch(partial(task_fail, task))
+
+        return proc, f
+
+def task_done(task, res):
+    print("\033[32m  Finished '%s'\033[0m" % task_name(task))
+
+def task_fail(task, exc):
+    print("\033[31m  Failed '%s': %s\033[0m" % (task_name(task), exc))
 
 
 # == App ==
@@ -210,11 +224,7 @@ def main(argv):
         tasks = sum([task.split(args.concurrent) for task in tasks], [])
 
     # Commit
-        for task in tasks:
-            name = task_name(task)
-            task.commit2().then(lambda x: print("\033[32m  Finished '%s'\033[0m" % name))\
-                          .catch(lambda e: print("\033[31m  Failed '%s': %s\033[0m" % (name, e)))
-
+        [t.commit2() for t in tasks]
         aav.process_queue()
         aav.wait()
 
