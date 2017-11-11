@@ -25,7 +25,7 @@ xconv ffmpeg wrapper based on AdvancedAV
 Decorators for defining xconv profiles
 """
 
-from .profileman import index
+from .profileman import index, make_qname
 
 from functools import wraps
 
@@ -38,6 +38,7 @@ __all__ = [
     "features",
     "singleaudio"
 ]
+
 
 # == Misc. helpers ==
 def __update(f, name, update):
@@ -65,7 +66,7 @@ def profile(f):
         ext=None,
         defines={},
         features={})
-    index[f.__name__] = f
+    index[make_qname(f.__module__, f.__name__)] = f
     return f
 
 
