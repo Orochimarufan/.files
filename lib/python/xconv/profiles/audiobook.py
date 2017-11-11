@@ -25,40 +25,104 @@ xconv ffmpeg wrapper based on AdvancedAV
 Opus Audiobook profile
 """
 
+import os
+
 from ..profile import *
 
 
 abdefines = dict(
-    stereo="Use two channels at 48k",
-    bitrate="Use custom target bitrate",
-    fancy="Use 56kbps stereo (For dramatic audiobooks with a lot of music and effects)"
+    bitrate = "Use custom target bitrate",
+    stereo  = "Use 2 channels (Ignored for mono source streams)",
+    fancy   = "Use higher bitrates (48k mono/64k stereo)",
+    ogg     = "Use the .ogg file extension (Currently required on Android)"
 )
 
-def apply(stream, defines):
-    stream.set(codec="libopus",
-            vbr="on",
-            b="40k",
-            ac="1",
-            application="voip")
-    if stream.source.channels > 1:
-        if "stereo" in defines:
-            stream.set(ac="2",
-                    b="48k")
+def apply_stream(stream, defines):
+    """ Apply the audiobook profile to an output stream """
+    stream.codec = "libopus"
+    stream.channels = 1
+    stream.bitrate = 40_000
+
+    stream.set(vbr="on", application="voip")
+
+    # High Quality
+    if "fancy" in defines:
+        stream.bitrate = 48_000
+        stream.set(application="audio")
+
+    # Stereo Options
+    if stream.source.channels > 1 and "stereo" in defines:
+        stream.channels = 2
+        stream.bitrate = 48_000
+
         if "fancy" in defines:
-            stream.set(ac="2",
-                    b="56k",
-                    application="audio")
+            stream.bitrate = 64_000
+
+    # Custom bitrate
     if "bitrate" in defines:
         stream.bitrate = defines["bitrate"]
-    # At most input bitrate; we wouldn't gain anything since opus should be same or better compression
+
+    # Limit to input bitrate
     stream.bitrate = min(stream.bitrate, stream.source.bitrate)
 
 
 @profile
 @description("Encode Opus Audiobook")
-@output(container="ogg", ext="ogg")
+@output(container="ogg", ext="opus")
 @defines(**abdefines)
 @singleaudio
 def audiobook(task, stream, defines):
-    apply(task.map_stream(stream), defines)
+    if "ogg" in "defines":
+        task.change_format(ext="ogg")
+
+    apply_stream(task.map_stream(stream), defines)
+
+    return True
+
+
+@profile
+@description("Split & Encode Opus Audiobook from M4B chapters")
+@output(container="ogg", ext="opus")
+@features(no_single_output=True)
+@defines(ignore_ends="Ignore chapter end marks and continue until next chapter starts",
+         chapter_only_names="Don't include the input filename in the output filename",
+         **abdefines)
+@singleaudio
+def from_chapters(task, stream, defines):
+    # Read chapters from input
+    if "ignore_ends" in defines:
+        # Make sure nothing is cut out because of
+        # broken chapter (end) markers
+        it = iter(task.iter_chapters())
+        first_chapter = next(it)
+
+        chapters = [{"title": first_chapter.title}]
+
+        for chapter in it:
+            chapters[-1]["to"] = chapter.start_time
+            chapters.append({"ss": chapter.start_time,
+                             "title": chapter.title})
+
+    else:
+        chapters = [{"ss": chapter.start_time,
+                     "to": chapter.end_time,
+                     "title": chapter.title}
+                    for chapter in task.iter_chapters()]
+
+    # Output filenames
+    ext = "ogg" if "ogg" in defines else "opus"
+
+    if "chapter_only_names" in defines:
+        fn_template = os.path.join(task.output_directory, "%%s.%s" % ext)
+    else:
+        fn_template = "%s - %%s.%s" % (task.output_prefix, ext)
+
+    # Set up output files
+    for chapter in chapters:
+        out = task.add_output(fn_template % chapter.pop("title"), "ogg")
+
+        out.set(**chapter)
+
+        apply_stream(out.map_stream(stream), defines)
+
     return True
