@@ -23,4 +23,4 @@ xconv ffmpeg wrapper based on AdvancedAV
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-version_info = 0, 3, 0
+version_info = 0, 3, 1

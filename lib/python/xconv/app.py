@@ -104,10 +104,17 @@ def create_task(aav, profile, inputs, args, filename_from=None):
 def task_name(task):
     if hasattr(task, "name"):
         return basename(task.name)
-    elif task.inputs:
-        return "<%s" % task.inputs[0].name
-    elif task.outputs:
-        return ">%s" % task.outputs[0].name
+    elif task.inputs or task.outputs:
+        name = "ffT"
+        if task.inputs:
+            name += " <`%s`" % task.inputs[0].name
+            if len(task.inputs) > 1:
+                name += "..."
+        if task.outputs:
+            name += " >`%s`" % task.outputs[0].name
+            if len(task.outputs) > 1:
+                name += "..."
+        return name
     else:
         return "(anon task %p)" % id(task)
 
@@ -204,8 +211,9 @@ def main(argv):
 
     # Commit
         for task in tasks:
-            task.commit2().then(lambda x: print("\033[32m  Finished '%s'\033[0m" % task_name(task)))\
-                          .catch(lambda e: print("\033[31m  Failed '%s': %s\033[0m" % (task_name(task), e)))
+            name = task_name(task)
+            task.commit2().then(lambda x: print("\033[32m  Finished '%s'\033[0m" % name))\
+                          .catch(lambda e: print("\033[31m  Failed '%s': %s\033[0m" % (name, e)))
 
         aav.process_queue()
         aav.wait()
