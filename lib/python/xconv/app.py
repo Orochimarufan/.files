@@ -53,9 +53,17 @@ class SimpleTask(advancedav.SimpleTask):
 class AdvancedTask(advancedav.Task):
     output_factory = OutputFile
 
-    def __init__(self, aav, basename):
-        self.output_basename = basename
+    def __init__(self, aav, output_prefix):
+        self.output_prefix = output_prefix
+        self.output_directory = os.path.dirname(output_prefix)
+        self.output_basename = os.path.basename(output_prefix)
         super().__init__(aav)
+
+
+class Manager(advancedav.MultiAV):
+    def _spawn_next(self, **b):
+        print("\033[32m  Processing '%s'\033[0m" % task_name(self.queue[0][1]))
+        return super()._spawn_next(**b)
 
 
 # == App ==
@@ -125,12 +133,12 @@ def main(argv):
         return -1
 
     # Initialize AAV
-    aav = advancedav.SimpleAV(ffmpeg=args.ffmpeg, ffprobe=args.ffprobe)
+    aav = Manager(ffmpeg=args.ffmpeg, ffprobe=args.ffprobe, workers=args.concurrent)
 
     if args.quiet:
         aav.global_conv_args = "-loglevel", "warning"
 
-    aav.global_args += "-hide_banner",
+    aav.global_args += "-hide_banner", "-stats"
 
     # Collect Tasks
     tasks = []
@@ -190,10 +198,22 @@ def main(argv):
 
     print("\033[35mExecuting Tasks..\033[0m\033[K")
 
+    # Paralellize
+    if args.concurrent > 1 and not args.merge and not args.concat:
+        tasks = sum([task.split(args.concurrent) for task in tasks], [])
+
     # Commit
-    for task in tasks:
-        print("\033[32m  Processing '%s'\033[0m" % task_name(task))
-        task.commit()
+        for task in tasks:
+            task.commit2().then(lambda x: print("\033[32m  Finished '%s'\033[0m" % task_name(task)))\
+                          .catch(lambda e: print("\033[31m  Failed '%s': %s\033[0m" % (task_name(task), e)))
+
+        aav.process_queue()
+        aav.wait()
+
+    else:
+        for task in tasks:
+            print("\033[32m  Processing '%s'\033[0m" % task_name(task))
+            task.commit()
 
     # Clean up
     if args.concat:
