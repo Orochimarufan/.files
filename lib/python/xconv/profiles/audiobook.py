@@ -80,6 +80,7 @@ def audiobook(task, stream, defines):
     return True
 
 
+# Create multiple files from a single big one
 @profile
 @description("Split & Encode Opus Audiobook from M4B chapters")
 @output(container="ogg", ext="opus")
@@ -123,6 +124,35 @@ def from_chapters(task, stream, defines):
 
         out.set(**chapter)
 
+        apply_stream(out.map_stream(stream), defines)
+
+    return True
+
+
+@profile
+@description("Split into uniform pieces & Encode Opus Audiobook")
+@output(container="ogg", ext="opus")
+@features(no_single_output=True)
+@defines(interval="Length of a piece in minutes (default 30)",
+         **abdefines)
+@singleaudio
+def explode(task, stream, defines):
+    interval = float(defines.get("interval", 30)) * 60
+    ext = "ogg" if "ogg" in defines else "opus"
+
+    if stream.duration > interval:
+        fn_template = "%s - %%02s.%s" % (task.output_prefix, ext)
+        out = task.add_output(fn_template % 1, "ogg")
+
+        for n, ts in enumerate(range(interval, stream.duration, interval)):
+            out.set(to=ts)
+            out = task.add_output(fn_template % (n + 1), "ogg")
+            out.set(ss=ts)
+
+    else:
+        task.add_output("%s.%s" % (task.output_prefix, ext), "ogg")
+
+    for out in task.outputs:
         apply_stream(out.map_stream(stream), defines)
 
     return True
