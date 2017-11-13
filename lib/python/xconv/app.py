@@ -56,8 +56,8 @@ class AdvancedTask(advancedav.Task):
 
     def __init__(self, aav, output_prefix):
         self.output_prefix = output_prefix
-        self.output_directory = os.path.dirname(output_prefix)
-        self.output_basename = os.path.basename(output_prefix)
+        self.output_directory = dirname(output_prefix)
+        self.output_basename = basename(output_prefix)
         super().__init__(aav)
 
 
@@ -145,6 +145,11 @@ def main(argv):
 
     print("\033[36mXConv %s (c) Taeyeon Mori\033[0m" % version)
     print("\033[34mProfile: %s\033[0m" % args.profile)
+
+    unknown_defines = [n for n in args.defines.keys() if n not in profile.defines]
+    if unknown_defines:
+        print("\033[33mWarning: Unknown defines %s; see '%s -i %s' for avaliable defines in this profile\033[0m" %
+              (", ".join(unknown_defines), argv[0], args.profile))
 
     if args.create_directory:
         makedirs(args.output_directory, exist_ok=True)
