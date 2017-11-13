@@ -147,13 +147,13 @@ def explode(task, stream, defines):
     ext = "ogg" if "ogg" in defines else "opus"
 
     if npieces > 1:
-        fn_template = "%s - %%02s.%s" % (task.output_prefix, ext)
+        fn_template = "%s - %%02i.%s" % (task.output_prefix, ext)
         out = task.add_output(fn_template % 1, "ogg")
 
         for i in range(1, npieces):
             ts = i * interval
             out.set(to=ts)
-            out = task.add_output(fn_template % i, "ogg")
+            out = task.add_output(fn_template % (i + 1), "ogg")
             out.set(ss=ts)
 
     else:
