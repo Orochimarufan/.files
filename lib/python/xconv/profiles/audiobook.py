@@ -134,19 +134,26 @@ def from_chapters(task, stream, defines):
 @output(container="ogg", ext="opus")
 @features(no_single_output=True)
 @defines(interval="Length of a piece in minutes (default 30)",
+         minimum="Don't open a new piece if it's shorter than this (default 5)",
          **abdefines)
 @singleaudio
 def explode(task, stream, defines):
     interval = float(defines.get("interval", 30)) * 60
+    min_intv = float(defines.get("minimum", 5)) * 60
+
+    last_duration = stream_duration % interval
+    npieces = (stream.duration // interval) + (1 if last_duration > min_intv else 0)
+
     ext = "ogg" if "ogg" in defines else "opus"
 
-    if stream.duration > interval:
+    if npieces > 1:
         fn_template = "%s - %%02s.%s" % (task.output_prefix, ext)
         out = task.add_output(fn_template % 1, "ogg")
 
-        for n, ts in enumerate(range(interval, stream.duration, interval)):
+        for i in range(1, npieces):
+            ts = i * interval
             out.set(to=ts)
-            out = task.add_output(fn_template % (n + 1), "ogg")
+            out = task.add_output(fn_template % i, "ogg")
             out.set(ss=ts)
 
     else:
