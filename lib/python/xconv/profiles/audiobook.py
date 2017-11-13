@@ -141,7 +141,7 @@ def explode(task, stream, defines):
     interval = float(defines.get("interval", 30)) * 60
     min_intv = float(defines.get("minimum", 5)) * 60
 
-    last_duration = stream_duration % interval
+    last_duration = stream.duration % interval
     npieces = (stream.duration // interval) + (1 if last_duration > min_intv else 0)
 
     ext = "ogg" if "ogg" in defines else "opus"
