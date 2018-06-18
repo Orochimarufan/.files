@@ -57,6 +57,7 @@ ADD_UPDATES=false
 ADD_SCMPKGS=false
 RECURSE_DEPS=false
 NEED_COWER=false
+NEED_ROOT=false
 LIST_ONLY=false
 IGNORE_ERRORS=false
 EXCLUDE=
@@ -64,6 +65,8 @@ ASDEPS=true
 NEEDED=true
 NOCONFIRM=true
 USECUSTOM=true
+LOCAL_ONLY=false
+NOCLEAN=false
 
 add_makepkg_arg() {
   makepkg_args=("${makepkg_args[@]}" "$1")
@@ -106,10 +109,14 @@ process_arg() {
       DL_ONLY=true;;
     -a|--ask)
       ASK=true;;
+    --offline)
+      LOCAL_ONLY=true;;
     --aur-host|--exclude) # need more args
       _next_arg="$cx";;
     --no-custom)
       USECUSTOM=false;;
+    --noclean)
+      NOCLEAN=true;;
     -j|--threads)
       _next_arg=--threads;;
     -1)
@@ -122,6 +129,7 @@ process_arg() {
     -S|--recurse-deps)
       NEED_COWER=true
       RECURSE_DEPS=true
+      NEED_ROOT=true
       add_makepkg_arg -i;;
     -L|--list-only)
       LIST_ONLY=true;;
@@ -145,6 +153,7 @@ process_arg() {
       echo "                Only list all affected packages"
       echo "  -X, --download-only"
       echo "                Only download the PKGBUILDs from AUR, don't build."
+      echo "  --offline     Don't try to download new PKGBUILDs"
       echo "  -E, --ignore-errors"
       echo "                Continue with the next package even after a failure."
       echo "  -j, --threads [+-]<n>"
@@ -155,15 +164,18 @@ process_arg() {
       echo "  --exclude <pkgs>"
       echo "                Exclude packages from -u"
       echo "  --no-custom   Don't use custom packages from $CUSTOMDIR"
+      echo "  --noclean     Don't clean up temporary build directory when done."
+      echo
+      echo "  --clean       Clean up leaftover temporary files (of previous (failed) builds) and exit"
+      echo
+      echo "AUR backend options:"
       echo "  --aur-host <url>"
       echo "                Use a different AUR server. default: https://aur.archlinux.org/"
       echo "  --old-aur     Use the old (non-git) AUR methods"
       echo
-      echo "  --clean       Clean up leaftover temporary files (of failed builds) and exit"
-      echo
       echo "Makepkg/Pacman options:"
-      echo "  -i            Install package after building it"
-      echo "  -s            Install dependencies from official repos"
+      echo "  -i            Install package after building it (requires superuser)"
+      echo "  -s            Install dependencies from official repos (requires superuser)"
       echo "  --pkg <list>  Only build selected packages (when working with split packages)"
       echo "  --no-asdeps, --asexplicit"
       echo "                Don't pass --asdeps to pacman"
@@ -171,6 +183,7 @@ process_arg() {
       echo "                Don't pass --needed to pacman"
       echo "  --no-noconfirm"
       echo "                Don't pass --noconfirm to makepkg/pacman"
+      echo "  -o, --nobuild Download and extract sources only. Implies --noclean"
       echo
       echo "NOTE: options marked [c] require cower to be installed (\$ aur.sh -is cower)"
       echo "      However, certain cower-only features are automatically enabled when cower is found."
@@ -203,6 +216,12 @@ process_arg() {
     --no-noconfirm)
       NOCONFIRM=false;;
     # Makepkg args
+    -o|--nobuild) # Remember some stuff for own use
+      NOCLEAN=true
+      add_makepkg_arg "$cx";;
+    -i|--install|-s|--syncdeps)
+      NEED_ROOT=true
+      add_makepkg_arg "$cx";;
     --pkg|--key|--config|-p) # These take an additional value
       _proxy_args=1
       add_makepkg_arg "$cx";;
@@ -411,7 +430,7 @@ fetch_package() {
       warn "[AUR] $p: Found #CUSTOMPKG; not updating PKGBUILD from AUR!" \
     } || \
       $aur_get "$p" || \
-        { pkg_failed "$p" 2 "[AUR] $p: Couldn't download package!"; return $? }
+        warn "[AUR] $p: Couldn't download PKGBUILD from aur!"
 
     PKG_INFO[$p:From]="$AURDEST/$p"
   fi
@@ -423,9 +442,6 @@ build_package() {
   # Copy it to the build directory $build and change there
   cp -Lr "$PKG_INFO[$p:From]" "$build/$p"
   cd "$build/$p"
-
-  # Update timestamp, but don't ask for pw if it expired
-  sudo -vn
 
   # Run makepkg
   msg "[AUR] $p: Building..."
@@ -532,13 +548,28 @@ if $ASK; then
 fi
 
 # Fetch packages --------------------------
-for p in "${AFFECTED_PKGS[@]}"; do
-  fetch_package "$p"
-done
+if ! $LOCAL_ONLY; then
+  for p in "${AFFECTED_PKGS[@]}"; do
+    fetch_package "$p"
+  done
+elif $DL_ONLY; then
+  warn "[AUR] --offline and --download-only both given. Doing nothing. (Like --list-only)"
+fi
 
 if $DL_ONLY; then
   clean_exit
 fi
+
+# Add PKGBUILDs from cache
+for p in "${AFFECTED_PKGS[@]}"; do
+    if [ -z "$PKG_INFO[$p:From]" ]; then
+      if [ -d "$AURDEST/$p" ]; then
+        PKG_INFO[$p:From]="$AURDEST/$p"
+      else
+        pkg_failed "$p" 2 "[AUR] $p: Could not find PKGBUILD anywhere"
+      fi
+    fi
+done
 
 if (( ${#FAILED_PKGS} )); then
   warn "[AUR]: Failed to fetch packages (${#FAILED_PKGS}): ${FAILED_PKGS[*]}"
@@ -553,6 +584,7 @@ test -d "$build" || mkdir -p "$build" || throw 1 "Couldn't create build director
 
 clean_exit() {
   rm "$build/aur.sh.running" 2>/dev/null || true
+  [ -n "$SUDO_PROC" ] && kill $SUDO_PROC
   exit ${1-0}
 }
 
@@ -563,9 +595,17 @@ touch "$build/aur.sh.running"
 test "$build" = "$PWD" || \
   msg "[AUR] Working in $build."
 
-if $NOCONFIRM; then
+# Sudo
+if $NEED_ROOT && $NOCONFIRM; then
+  # Ask now
   msg "[AUR] Updating sudo timestamp"
   sudo -v
+  # Keep up
+  while true; do
+    sleep 250
+    sudo -vn
+  done &
+  SUDO_PROC=$!
 fi
 
 msg "[AUR] Makepkg args: ${makepkg_args[*]}"
@@ -586,8 +626,14 @@ msg "[AUR] All Done!"
 
 # Remove the builddir if we previously created it.
 cd "$AURDEST"
-[ "$build" = "$tmpbuild" ] && \
-  warn "[AUR] Removing temporary directory $tmpbuild" && \
-  rm -rf "$tmpbuild"
+if [ "$build" = "$tmpbuild" ]; then
+  if $NOCLEAN; then
+    msg "[AUR] Files in: $tmpbuild"
+    warn "[AUR] Clean up later with aur.sh --clean"
+  else
+    warn "[AUR] Removing temporary directory $tmpbuild"
+    rm -rf "$tmpbuild"
+  fi
+fi
 clean_exit
 
