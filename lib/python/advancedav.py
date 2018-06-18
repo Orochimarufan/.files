@@ -37,7 +37,7 @@ from pathlib import Path, PurePath
 
 __all__ = "AdvancedAVError", "AdvancedAV", "SimpleAV", "MultiAV"
 
-version_info = 2, 99, 5
+version_info = 2, 99, 6
 
 # Constants
 DEFAULT_CONTAINER = "matroska"
@@ -56,21 +56,77 @@ class AdvancedAVError(Exception):
 
 
 # == Helpers ==
-def ffmpeg_int(no: str) -> int:
-    if isinstance(no, str):
-        factor = 1
-        base = 1000
-        if no[-1].lower() == "b":
-            factor *= 8
-            no = no[:-1]
-        if no[-1].lower() == "i":
-            base = 1024
-            no = no[:-1]
-        if not no[-1].isdigit():
-            factor *= base ** (["k", "m", "g"].index(no[-1].lower()) + 1)
-            no = no[:-1]
-        return int(no) * factor
-    return int(no)
+class FFmpeg:
+    @staticmethod
+    def int(no: str) -> int:
+        """
+        Parse a ffmpeg number.
+        See https://ffmpeg.org/ffmpeg.html#Options
+        """
+        if isinstance(no, str):
+            factor = 1
+            base = 1000
+            if no[-1].lower() == "b":
+                factor *= 8
+                no = no[:-1]
+            if no[-1].lower() == "i":
+                base = 1024
+                no = no[:-1]
+            if not no[-1].isdigit():
+                factor *= base ** (["k", "m", "g"].index(no[-1].lower()) + 1)
+                no = no[:-1]
+            return int(no) * factor
+        return int(no)
+
+    # Commandline generation
+    @staticmethod
+    def argv_options(options: Mapping, qualifier: str=None) -> Iterator:
+        """ Yield arbitrary options
+
+        :type options: Mapping[str, str]
+        :rtype: Iterator[str]
+        """
+        if qualifier is None:
+            opt_fmt = "-%s"
+        else:
+            opt_fmt = "-%%s:%s" % qualifier
+        for option, value in options.items():
+            yield opt_fmt % option
+            if isinstance(value, (tuple, list)):
+                yield str(value[0])
+                for x in value[1:]:
+                    yield opt_fmt % option
+                    yield str(x)
+            elif value is not True and value is not None:
+                yield str(value)
+
+    @staticmethod
+    def argv_metadata(metadata: Mapping, qualifier: str=None) -> Iterator:
+        """ Yield arbitrary metadata
+
+        :type metadata: Mapping[str, str]
+        :rtype: Iterator[str]
+        """
+        if qualifier is None:
+            opt = "-metadata"
+        else:
+            opt = "-metadata:%s" % qualifier
+        for meta in metadata.items():
+            yield opt
+            yield "%s=%s" % meta
+
+    # Stream types
+    stype_by_ctype = {
+        "audio": S_AUDIO,
+        "video": S_VIDEO,
+        "subtitle": S_SUBTITLE,
+        "attachment": S_ATTACHMENT,
+        "data": S_DATA
+    }
+
+    @classmethod
+    def stype_from_ctype(ffmpeg, ctype):
+        return ffmpeg.stype_by_ctype.get(ctype, S_UNKNOWN)
 
 
 class Future:
@@ -333,12 +389,13 @@ class InputStream(Stream):
 
     @property
     def type(self):
-        return self.information["codec_type"][0]
+        return FFmpeg.stype_from_ctype(self.codec_type)
 
     index       = InformationProperty("index", type=int)
 
     codec       = InformationProperty("codec_name")
     codec_name  = InformationProperty("codec_long_name")
+    codec_type  = InformationProperty("codec_type")
     profile     = InformationProperty("profile")
 
     duration    = InformationProperty("duration", type=float)
@@ -364,7 +421,7 @@ class InputAudioStream(InputStream):
     __slots__ = ()
 
     def  __init__(self, file: "InputFile", info: dict, pertype_index: int=None):
-        if info["codec_type"][0] != S_AUDIO:
+        if info["codec_type"] != "audio":
             raise ValueError("Cannot create %s from stream info of type %s" % (type(self).__name__, info["codec_type"]))
 
         super().__init__(file, info)
@@ -380,9 +437,21 @@ class InputAudioStream(InputStream):
     channel_layout  = InformationProperty("channel_layout")
 
 
+class InputAttachmentStream(InputStream):
+    __slots__ = ()
+
+    @property
+    def type(self):
+        return S_ATTACHMENT
+
+    og_filename = InformationProperty("tags", "filename")
+    mimetype    = InformationProperty("tags", "mimetype")
+
+
 def input_stream_factory(file, info, pertype_index=None):
     return {
         "audio": InputAudioStream,
+        "attachment": InputAttachmentStream,
     }.get(info["codec_type"], InputStream)(file, info, pertype_index)
 
 
@@ -414,7 +483,7 @@ class OutputStream(Stream, ObjectWithOptions, ObjectWithMetadata):
 
     codec = OptionProperty("codec", "c")
 
-    bitrate = OptionProperty("b", type=ffmpeg_int)
+    bitrate = OptionProperty("b", type=FFmpeg.int)
 
 
 class OutputAudioStream(OutputStream):
@@ -436,22 +505,16 @@ def output_stream_factory(file, source, *args, **more):
 
 
 # === File Classes ===
-class File(ObjectWithOptions):
-    """
-    ABC for Input- and Output-Files
-    """
-    __slots__ = "_streams", "_streams_by_type", "options", "path"
+class BaseFile:
+    __slots__ = "path",
 
-    def __init__(self, path: Path, options: dict=None, **more):
-        super().__init__(options=options, **more)
+    def __init__(self, path: Path, **more):
+        super().__init__(**more)
 
         self.path = Path(path)
 
-        self._streams = []
-        """ :type: list[Stream] """
-
-        self._streams_by_type = collections.defaultdict(list)
-        """ :type: dict[str, list[Stream]] """
+    def generate_args(self):
+        raise NotImplementedError("generate_args not implemented on base file")
 
     # Filename
     @property
@@ -476,6 +539,29 @@ class File(ObjectWithOptions):
     @filename.setter
     def filename(self, value):
         self.path = Path(value)
+
+    # Streams
+    @property
+    def streams(self) -> Sequence:
+        return ()
+
+    video_streams = audio_streams = subtitle_streams = attachment_streams = data_streams = streams
+
+
+class File(BaseFile, ObjectWithOptions):
+    """
+    ABC for Input- and Output-Files
+    """
+    __slots__ = "_streams", "_streams_by_type", "options"
+
+    def __init__(self, path: Path, options: dict=None, **more):
+        super().__init__(path=path, options=options, **more)
+
+        self._streams = []
+        """ :type: list[Stream] """
+
+        self._streams_by_type = collections.defaultdict(list)
+        """ :type: dict[str, list[Stream]] """
 
     # Streams
     def _add_stream(self, stream: Stream):
@@ -577,6 +663,14 @@ class InputFile(File):
             self._initialize_info()
         return self._information
 
+    def generate_args(self) -> Iterator:
+        # Input options
+        yield from FFmpeg.argv_options(self.options)
+
+        # Add Input
+        yield "-i"
+        yield self.filename if self.filename[0] != "-" else "./" + self.filename
+
     # -- Initialize
     ffprobe_args = "-show_format", "-show_streams", "-show_chapters", "-print_format", "json"
 
@@ -589,7 +683,7 @@ class InputFile(File):
         The locale of the probe output in \param probe should be C!
         """
         for sinfo in self.information["streams"]:
-            stype = sinfo["codec_type"][0]
+            stype = FFmpeg.stype_from_ctype(sinfo["codec_type"])
             stream = self.stream_factory(self, sinfo, len(self._streams_by_type[stype]))
             self._streams.append(stream)
             self._streams_by_type[stype].append(stream)
@@ -698,6 +792,33 @@ class OutputFile(File, ObjectWithMetadata):
         self._mapped_sources = set()
         """ :type: set[InputStream] """
 
+    def generate_args(self) -> Iterator:
+        # Global Metadata & Additional Options
+        yield from FFmpeg.argv_metadata(self.metadata)
+        yield from FFmpeg.argv_options(self.options)
+
+        # Map Streams, sorted by type
+        self.reorder_streams()
+
+        for stream in self.streams:
+            yield "-map"
+            yield self.task.qualified_input_stream_spec(stream.source)
+
+            if stream.codec is not None:
+                yield "-c:%s" % stream.stream_spec
+                yield stream.codec
+
+            yield from FFmpeg.argv_metadata(stream.metadata, stream.stream_spec)
+            yield from FFmpeg.argv_options(stream.options, stream.stream_spec)
+
+        # Container
+        if self.container is not None:
+            yield "-f"
+            yield self.container
+
+        # Output Filename, prevent it from being interpreted as option
+        yield self.filename if self.filename[0] != "-" else "./" + self.filename
+
     # -- Map Streams
     def map_stream_(self, stream: InputStream, codec: str=None, options: Mapping=None) -> OutputStream:
         """ map_stream() minus add_input_file
@@ -785,6 +906,45 @@ class OutputFile(File, ObjectWithMetadata):
         return self
 
 
+# === Dump Attachments ===
+# see also Task.generate_args()
+class AttachmentOutputStream(Stream):
+    __slots__ = ()
+
+    def __init__(self, file):
+        super().__init__(file=file)
+
+    @property
+    def source(self):
+        return self.file.source
+
+    @property
+    def type(self):
+        return S_ATTACHMENT
+
+
+class AttachmentOutputFile(BaseFile):
+    __slots__ = "source"
+
+    def __init__(self, source: InputAttachmentStream, path: Path=None):
+        if path is None:
+            path = source.og_filename
+
+        super().__init__(path=path)
+
+        self.source = source
+
+    def generate_args(self):
+        yield "-dump_attachment:%s" % self.source.stream_spec
+        yield self.filename if self.filename[0] != "-" else "./" + self.filename
+
+    @property
+    def attachment_streams(self):
+        return (AttachmentOutputStream(self),)
+
+    streams = attachment_streams
+
+
 # === Task Classes ===
 class BaseTask:
     """
@@ -844,88 +1004,29 @@ class BaseTask:
     # outputs: Sequence[OutputFile]
 
     # -- FFmpeg
-    @staticmethod
-    def argv_options(options: Mapping, qualifier: str=None) -> Iterator[str]:
-        """ Yield arbitrary options
-
-        :type options: Mapping[str, str]
-        :rtype: Iterator[str]
-        """
-        if qualifier is None:
-            opt_fmt = "-%s"
-        else:
-            opt_fmt = "-%%s:%s" % qualifier
-        for option, value in options.items():
-            yield opt_fmt % option
-            if isinstance(value, (tuple, list)):
-                yield str(value[0])
-                for x in value[1:]:
-                    yield opt_fmt % option
-                    yield str(x)
-            elif value is not True and value is not None:
-                yield str(value)
-
-    @staticmethod
-    def argv_metadata(metadata: Mapping, qualifier: str=None) -> Iterator[str]:
-        """ Yield arbitrary metadata
-
-        :type metadata: Mapping[str, str]
-        :rtype: Iterator[str]
-        """
-        if qualifier is None:
-            opt = "-metadata"
-        else:
-            opt = "-metadata:%s" % qualifier
-        for meta in metadata.items():
-            yield opt
-            yield "%s=%s" % meta
-
     def generate_args(self) -> Iterator[str]:
         """ Generate the ffmpeg commandline for this task
 
         :rtype: Iterator[str]
         """
+        # Dump attachments. this is stupid, ffmpeg!
+        # dumping attachments is inherently creating output files
+        # and shouldn't be done by an input option
+        # This HACK may or may not stay in final v3....
+        attachment_dumps = [o for o in self.outputs if isinstance(o, AttachmentOutputFile)]
+
         # Inputs
         for input_ in self.inputs:
-            # Input options
-            yield from self.argv_options(input_.options)
+            for output in attachment_dumps:
+                if output.source.file is input_:
+                    yield from output.generate_args()
 
-            # Add Input
-            yield "-i"
-            filename = input_.filename
-            if filename[0] == '-':
-                yield "./" + filename
-            else:
-                yield filename
+            yield from input_.generate_args()
 
         # Outputs
         for output in self.outputs:
-            # Global Metadata & Additional Options
-            yield from self.argv_metadata(output.metadata)
-            yield from self.argv_options(output.options)
-
-            # Map Streams, sorted by type
-            output.reorder_streams()
-
-            for stream in output.streams:
-                yield "-map"
-                yield self.qualified_input_stream_spec(stream.source)
-
-                if stream.codec is not None:
-                    yield "-c:%s" % stream.stream_spec
-                    yield stream.codec
-
-                yield from self.argv_metadata(stream.metadata, stream.stream_spec)
-                yield from self.argv_options(stream.options, stream.stream_spec)
-
-            # Container
-            if output.container is not None:
-                yield "-f"
-                yield output.container
-
-            # Output Filename, prevent it from being interpreted as option
-            out_fn = output.filename
-            yield out_fn if out_fn[0] != "-" else "./" + out_fn
+            if output not in attachment_dumps:
+                yield from output.generate_args()
 
     def commit(self, additional_args: Iterable=(), immediate=True, **args):
         """
@@ -1050,6 +1151,18 @@ class Task(BaseTask):
         else:
             outfile = self.output_factory(self, filename, container, options)
             self.pp.to_debug("New output file #%i: %s", len(self.outputs), filename)
+            self.outputs.append(outfile)
+            return outfile
+
+    # -- Attachment Shenanigans
+    def dump_attachment(self, attachment: InputAttachmentStream, filename: str=None) -> AttachmentOutputFile:
+        for outfile in self.outputs:
+            if outfile.filename == filename:
+                raise AdvancedAVError("Output file '%s' already added." % file)
+        else:
+            if attachment.type != S_ATTACHMENT:
+                raise AdvancedAVError("Stream %r not an attachment!" % attachment)
+            outfile = AttachmentOutputFile(attachment, filename)
             self.outputs.append(outfile)
             return outfile
 
@@ -1223,7 +1336,7 @@ class SimpleAV(AdvancedAV):
         return out.decode("utf-8", "replace")
 
     def probe_file(self, file, *, ffprobe_args_hint=None):
-        probe = self.call_probe(tuple(BaseTask.argv_options(file.options))
+        probe = self.call_probe(tuple(FFmpeg.argv_options(file.options))
                                     + ffprobe_args_hint
                                     + ("-i", file.filename))
         return json.loads(probe)
