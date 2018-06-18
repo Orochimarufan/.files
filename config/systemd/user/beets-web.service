@@ -1,0 +1,9 @@
+[unit]
+Description=Beets Web
+
+[Service]
+ExecStart=/usr/bin/beet web
+
+[Install]
+WantedBy=default.target
+
