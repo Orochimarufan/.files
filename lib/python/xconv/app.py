@@ -47,13 +47,15 @@ class OutputFile(advancedav.OutputFile):
             self.name = splitext(self.name)[0] + "." + ext
 
 
-class SimpleTask(advancedav.SimpleTask):
+class XconvMixin:
     output_factory = OutputFile
 
 
-class AdvancedTask(advancedav.Task):
-    output_factory = OutputFile
+class SimpleTask(XconvMixin, advancedav.SimpleTask):
+    pass
 
+
+class AdvancedTask(XconvMixin, advancedav.Task):
     def __init__(self, aav, output_prefix):
         self.output_prefix = output_prefix
         self.output_directory = dirname(output_prefix)
@@ -215,12 +217,12 @@ def main(argv):
 
     if args.update:
         for task in tasks[:]:
-            for output in [o for o in task.outputs if exists(o.name)]:
-                print("\033[33m  Skipping existing '%s' (--update)\033[0m\033[K" % basename(skip.name))
-                task.outputs.remove(skip)
+            for output in [o for o in task.outputs if exists(o.filename)]:
+                print("\033[33m  Skipping existing '%s' (--update)\033[0m\033[K" % output.name)
+                task.outputs.remove(output)
             if not tasks.outputs:
                 print("\033[33m  Skipping task '%s' because no output files are left\033[0m\033[K" % task_name(task))
-                tasks.remove[task]
+                tasks.remove(task)
 
     print("\033[35mExecuting Tasks..\033[0m\033[K")
 

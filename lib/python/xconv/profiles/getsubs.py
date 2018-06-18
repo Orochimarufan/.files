@@ -34,7 +34,7 @@ from ..profile import *
 @features(no_single_output=True)
 def getsubs(task, defines):
     for stream in task.iter_subtitle_streams():
-        of = task.add_output("%s.%s.%s" % (task.output_prefix, task.inputs.index(stream.file), stream.stream_spec), None) # TODO get real file extension
+        of = task.add_output("%s.%s.%s.%s" % (task.output_prefix, task.inputs.index(stream.file), stream.pertype_index, stream.codec), None) # TODO get real file extension
         os = of.map_stream(stream)
         if "format" in defines:
         	os.codec = defines["format"]

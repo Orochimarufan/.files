@@ -97,6 +97,7 @@ def features(**features):
     - argshax: Pass parsed cmdline arguments in 'args' kwd
     - singleaudio: Indicates that it operates on a single audio stream. No effects
     - no_single_output: Profile doesn't constitute a 1:1 file conversion. Don't use SimpleTask
+    - skip_existing_output: omit any outputs that already exist. (i.e. always --update)
     - advanced_task: reserved
     """
     def apply(f):
