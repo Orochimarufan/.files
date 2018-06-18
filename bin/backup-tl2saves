@@ -2,7 +2,7 @@
 # Back-up Torchlight II savegames
 
 # Path to steam library
-STEAM_APPS=/media/Data/SteamLibrary/SteamApps
+STEAM_APPS="/media/Data/Games/Steam Library/steamapps"
 # Steam User ID to save, use * to backup all saves
 STEAM_USER=*
 # Path to create backups at

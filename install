@@ -117,7 +117,7 @@ msg "Linking .config files... ($XDG_CONFIG_HOME)"
         file="${file:2}"
         color 32 echo "  Adding $file"
         if [[ -L "$file" ]]; then
-            cp "$file" "$XDG_CONFIG_HOME/$file"
+            cp -P "$file" "$XDG_CONFIG_HOME/$file"
         else
             relink "$DOT/config/$file" "$XDG_CONFIG_HOME/$file"
         fi

@@ -5,11 +5,12 @@
 import os
 import sys
 import re
-import itertools
-import functools
 import logging
 import argparse
 import collections
+import itertools
+import functools
+import operator
 
 
 logger = logging.getLogger("AnimeImport")
@@ -93,6 +94,15 @@ def natural_sort_key(s, *, _nsre=re.compile(r'(\d+)')):
 
 def natural_name_sort_key(f, *, _nsre=re.compile(r'(\d+)')):
     return [int(text) if text.isdigit() else text.lower() for text in _nsre.split(f.name)]
+
+
+og_symlink = os.symlink
+
+#def symlink(*a):
+#    logger.info("SYMLINK %s", a)
+#    og_symlink(*a)
+
+#os.symlink = symlink
 
 
 ###############################################################################
@@ -582,18 +592,20 @@ class Importer:
         Update this library entry
         """
         for path, diff in self.diff().items():
-            for f, target in diff[self.DIFF_MINUS].items():
+            for f, target in sorted(diff[self.DIFF_MINUS].items(), key=operator.itemgetter(0)):
                 # Check if target still matches?
                 logger.info("Remove %s (%s)" % (f, os.path.basename(target)))
                 if not dry:
                     os.unlink(os.path.join(path, f))
-            for f, target in diff[self.DIFF_PLUS].items():
+            for f, target in sorted(diff[self.DIFF_PLUS].items(), key=operator.itemgetter(0)):
                 logger.info("Link %s => %s" % (f, os.path.basename(target)))
                 lpath = os.path.join(path, f)
                 if os.path.exists(lpath):
                     raise FileExistsError("File %s already exists" % f)
                 if not dry:
                     os.symlink(target, lpath)
+            if not diff[self.DIFF_SAME] and not diff[self.DIFF_PLUS]:
+                logger.warn("Library Entry '%s' has no content!" % self.main_name)
 
 
 ###############################################################################
@@ -701,7 +713,13 @@ def parse_args(argv):
 # Helpers
 def run_update(i, args):
     """ Update the symlinks for a Series Importer """
-    return i.run(dry=args.dry_run) == 0
+    try:
+        i.run(dry=args.dry_run)
+    except:
+        logger.exception("Exception running %s" % i)
+        return False
+    else:
+        return True
 
 def get_series_importer(args, series=None):
     if series is None:
@@ -720,7 +738,7 @@ def get_series_importer(args, series=None):
 
 def list_series_paths(library):
     return [de.path
-            for de in os.scandir(library)
+            for de in sorted(os.scandir(library), key=natural_name_sort_key)
             if de.is_dir(follow_symlinks=False)]
 
 def get_series_importers(args, series=None):
@@ -843,8 +861,8 @@ def check_main(args):
 
     if args.source_roots:
         dirs = set(map(os.path.abspath, filter(os.path.isdir, itertools.chain.from_iterable(((os.path.join(f, x) for x in os.listdir(f)) for f in args.source_roots)))))
-        ignore = set(map(os.path.abspath, filter(os.path.isdir, itertools.chain.from_iterable(((os.path.join(f, x) for x in args.ignore) for f in args.source_roots)))))
-        print(ignore)
+        ignore = set(map(os.path.abspath, filter(os.path.isdir, (os.path.join(f, x) for x in args.ignore for f in args.source_roots))))
+        print(args.ignore, args.source_roots, ignore)
         missing = dirs - got_dirs - ignore
         if missing:
             if args.interactive_import:
@@ -858,17 +876,16 @@ def update_main(args):
     fin_dirs = set()
 
     for i in get_series_importers(args, args.series):
-        logger.info("Processing '%s' (%s)" % (i.main_name, i.flags))
-
         if i.destination in fin_dirs:
-            logger.info("Already processed '%s'. Skipping" % i.main_name)
+            logger.debug("Already processed '%s'. Skipping" % i.main_name)
             continue
+
+        logger.info("Processing '%s' (%s)" % (i.main_name, i.flags))
 
         if not check(i):
             continue
 
         if run_update(i, args):
-            got_dirs.update(map(os.path.abspath, i.sources))
             fin_dirs.add(i.destination)
 
     return 0

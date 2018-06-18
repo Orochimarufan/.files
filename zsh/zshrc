@@ -63,9 +63,16 @@ function gupf {
 
 
 #
+# pacman/makepkg
+#
+alias mksrcinfo="makepkg --printsrcinfo >! .SRCINFO"
+
+
+#
 # rsync
 #
-alias rsync="rsync -aXzzPvihs -e ssh"
+alias rsync="command rsync -e ssh -aXSPzs -vih8"
+alias termux-rsync="command rsync -e 'ssh -p 8022' -rltXSPzzs -vih8"
 
 
 #
@@ -92,6 +99,15 @@ if (( $+commands[busybox] )); then
         unset __whence
     done
 fi
+
+
+#
+# Konsole scroll buffer
+#
+function clearbuf {
+    echo -en "\e[3J"
+}
+
 
 #
 # Misc.
