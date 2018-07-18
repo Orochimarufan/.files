@@ -37,7 +37,7 @@ from pathlib import Path, PurePath
 
 __all__ = "AdvancedAVError", "AdvancedAV", "SimpleAV", "MultiAV"
 
-version_info = 2, 99, 6
+version_info = 2, 99, 7
 
 # Constants
 DEFAULT_CONTAINER = "matroska"
@@ -197,6 +197,8 @@ class ObjectWithOptions:
     Subclasses must provide an 'options' slot.
     """
     __slots__ = ()
+    
+    local_option_names = ()
 
     def __init__(self, *, options=None, **more):
         super().__init__(**more)
@@ -230,6 +232,13 @@ class ObjectWithOptions:
         """
         self.options.update(options)
         return self
+    
+    @property
+    def ffmpeg_options(self):
+        if self.local_option_names:
+            return {k: v for k, v in self.options.items() if k not in self.local_option_names}
+        else:
+            return self.options
 
 
 class ObjectWithMetadata:
@@ -665,7 +674,7 @@ class InputFile(File):
 
     def generate_args(self) -> Iterator:
         # Input options
-        yield from FFmpeg.argv_options(self.options)
+        yield from FFmpeg.argv_options(self.ffmpeg_options)
 
         # Add Input
         yield "-i"
@@ -775,6 +784,8 @@ class OutputFile(File, ObjectWithMetadata):
     Holds information about an output file
     """
     __slots__ = "task", "container", "_mapped_sources", "metadata"
+    
+    local_option_names = ("reorder_streams",) + File.local_option_names
 
     stream_factory = staticmethod(output_stream_factory)
 
@@ -783,6 +794,7 @@ class OutputFile(File, ObjectWithMetadata):
         super().__init__(name, options=options, metadata=metadata)
 
         self.options.setdefault("c", "copy")
+        self.options.setdefault("reorder_streams", True)
 
         self.task = task
 
@@ -795,10 +807,11 @@ class OutputFile(File, ObjectWithMetadata):
     def generate_args(self) -> Iterator:
         # Global Metadata & Additional Options
         yield from FFmpeg.argv_metadata(self.metadata)
-        yield from FFmpeg.argv_options(self.options)
+        yield from FFmpeg.argv_options(self.ffmpeg_options)
 
         # Map Streams, sorted by type
-        self.reorder_streams()
+        if self.options["reorder_streams"]:
+            self.reorder_streams()
 
         for stream in self.streams:
             yield "-map"
@@ -809,7 +822,7 @@ class OutputFile(File, ObjectWithMetadata):
                 yield stream.codec
 
             yield from FFmpeg.argv_metadata(stream.metadata, stream.stream_spec)
-            yield from FFmpeg.argv_options(stream.options, stream.stream_spec)
+            yield from FFmpeg.argv_options(stream.ffmpeg_options, stream.stream_spec)
 
         # Container
         if self.container is not None:
