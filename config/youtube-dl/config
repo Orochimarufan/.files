@@ -1,0 +1,31 @@
+# Formats (YouTube): Prefer VP9 + Opus
+# Audio:
+# 251 Opus 160
+# 250 Opus 64
+# 249 Opus 48
+# 140 AAC 128
+# Video:
+# 337 VP9/2 2160p60 HDR (Overkill)
+# 336 VP9/2 1440p60 HDR
+# 335 VP9/2 1080p60 HDR
+# 334 VP9/2 720p60 HDR
+# 315 VP9 2160p60 (OK)
+# 308 VP9 1440p60
+# 303 VP9 1080p60
+# 302 VP9 720p60
+# 272 VP9 4320p (OK)
+# 313 VP9 2160p (OK)
+# 271 VP9 1440p
+# 248 VP9 1080p
+# 247 VP9 720p
+# 244 VP9 480p
+#--format "(336/308/271/335/303/248/334/302/247/244)+(251/250/140/249)/best"
+--format '(bestvideo[vcodec=vp9]/bestvideo)+(bestaudio[acodec=opus]/bestaudio)/best'
+# Keep record of already downloaded files in a folder
+--download-archive ".youtube-dl"
+# Post-Processing
+--use-aavpp
+--recode-video mkv
+--embed-subs
+--add-metadata
+
