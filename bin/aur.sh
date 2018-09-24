@@ -184,11 +184,12 @@ process_arg() {
       echo "  -r            Remove installed dependencies after build"
       echo "  --pkg <list>  Only build selected packages (when working with split packages)"
       echo "  --asdeps      Pass --asdeps to pacman for all installed packages"
-      echo "  --no-needed, --reinstall"
-      echo "                Don't pass --needed to pacman"
-      echo "  --no-noconfirm"
-      echo "                Don't pass --noconfirm to makepkg/pacman"
+      echo "  --reinstall   Reinstall installed packages, even when version info matches."
+      echo "  --needed      Opposite of --reinstall (default)"
+      echo "  --noconfirm   Skip makepkg/pacman confirmation prompts (default)"
       echo "  -o, --nobuild Download and extract sources only. Implies --noclean"
+      echo "  -f, --force   Force rebuilding of built packages. Implies --reinstall"
+      echo "  --no-         Negate options: --no-asdeps --no-noconfirm"
       echo
       echo "NOTE: options marked [c] require cower to be installed (\$ aur.sh -is cower)"
       echo "      However, certain cower-only features are automatically enabled when cower is found."
@@ -208,19 +209,28 @@ process_arg() {
       color 35 echo "Cleaned leftover temporary files."
       exit 0;;
     # Inverted makepkg args
-    --asdeps|--no-asexplicit)
+    --asdeps)
       ASDEPS=true;;
-    --no-asdeps|--asexplicit)
+    --no-asdeps)
       ASDEPS=false;;
+    --asexplicit)
+      echo "NOTE: --asexplicit and --no-asexplicit are DEPRECATED."
+      ASDEPS=false;;
+    --no-asexplicit)
+      echo "NOTE: --asexplicit and --no-asexplicit are DEPRECATED."
+      ASDEPS=true;;
     --needed|--no-reinstall)
       NEEDED=true;;
-    --no-needed|--reinstall)
+    --reinstall|--no-needed)
       NEEDED=false;;
     --noconfirm)
       NOCONFIRM=true;;
     --no-noconfirm)
       NOCONFIRM=false;;
     # Makepkg args
+    -f|--force)
+      NEEDED=false;
+      add_makepkg_arg "$cx";;
     -o|--nobuild) # Remember some stuff for own use
       NOCLEAN=true
       add_makepkg_arg "$cx";;
