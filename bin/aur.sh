@@ -43,6 +43,11 @@ function is-more {
   return $?
 }
 
+function check_bool {
+  [[ -n "$1" ]] && $1
+  return $?
+}
+
 
 # ------------------------------------------------------------------------------
 # Parse commandline: anything prefixed with - is a makepkg option, others are package names
@@ -61,7 +66,7 @@ NEED_ROOT=false
 LIST_ONLY=false
 IGNORE_ERRORS=false
 EXCLUDE=
-ASDEPS=true
+ASDEPS=false
 NEEDED=true
 NOCONFIRM=true
 USECUSTOM=true
@@ -176,9 +181,9 @@ process_arg() {
       echo "Makepkg/Pacman options:"
       echo "  -i            Install package after building it (requires superuser)"
       echo "  -s            Install dependencies from official repos (requires superuser)"
+      echo "  -r            Remove installed dependencies after build"
       echo "  --pkg <list>  Only build selected packages (when working with split packages)"
-      echo "  --no-asdeps, --asexplicit"
-      echo "                Don't pass --asdeps to pacman"
+      echo "  --asdeps      Pass --asdeps to pacman for all installed packages"
       echo "  --no-needed, --reinstall"
       echo "                Don't pass --needed to pacman"
       echo "  --no-noconfirm"
@@ -247,7 +252,6 @@ for cx in "$@"; do
 done
 
 # Inverted Makepkg args
-$ASDEPS && add_makepkg_arg "--asdeps"
 $NEEDED && add_makepkg_arg "--needed"
 $NOCONFIRM && add_makepkg_arg "--noconfirm"
 
@@ -336,7 +340,11 @@ collect_package() {
   if (( $AFFECTED_PKGS[(I)$p] )); then
     return 0
   fi
+  
+  # Set Defaults
+  PKG_INFO[$p:AsDeps]=$ASDEPS
 
+  # Get package information
   if $USECUSTOM && [ -e "$CUSTOMDIR/$p" ]; then
     msg "[AUR] Found '$p' in '$CUSTOMDIR', Using that"
     cd "$CUSTOMDIR"
@@ -360,6 +368,7 @@ collect_package() {
     fi
   fi
 
+  # Check for split package
   if [ -n "$PKG_INFO[$p:PackageBase]" ]; then
     color 35 echo "[AUR] $p: Is a split package. Selecting base package '$PKG_INFO[$p:PackageBase]' instead."
     warn "[AUR] Operations on specific sub-packages require the base package to be specified along with --pkg."
@@ -367,6 +376,7 @@ collect_package() {
     return $?
   fi
 
+  # Check for dependencies
   if [ -n "$PKG_INFO[$p:Depends]" ]; then
     # process dependencies
     PKG_INFO[$p:Dependencies]=""
@@ -406,10 +416,13 @@ collect_package() {
       if $RECURSE_DEPS && ! pacman -Qi "$dep" >/dev/null 2>&1 && cower -i "$dep" >/dev/null 2>&1; then # Check if it's an (un-installed) aur package
         color 35 echo "[AUR] $p: Collecting AUR dependency '$dep'..."
         collect_package "$dep"
+        # Mark as dependency
+        PKG_INFO[$dep:AsDeps]=true
       fi
     done
   fi
 
+  # Queue package for build
   if ! (( $AFFECTED_PKGS[(I)$p] )); then # Don't add split packages depending on themselves multiple times. FIXME: Properly handle cycles
     AFFECTED_PKGS=("${AFFECTED_PKGS[@]}" "$p")
   fi
@@ -442,10 +455,17 @@ build_package() {
   # Copy it to the build directory $build and change there
   cp -Lr "$PKG_INFO[$p:From]" "$build/$p"
   cd "$build/$p"
+  
+  # Build makepkg args
+  local add_args=()
+  
+  if check_bool $PKG_INFO[$p:AsDeps]; then
+    add_args+=("--asdeps")
+  fi
 
   # Run makepkg
   msg "[AUR] $p: Building..."
-  makepkg "${makepkg_args[@]}" || \
+  makepkg "${makepkg_args[@]}" "${add_args[@]}" || \
     { pkg_failed "$p" 1 "[AUR] $p: Makepkg failed!"; return $? }
 
   msg "[AUR] $p: Done!"
