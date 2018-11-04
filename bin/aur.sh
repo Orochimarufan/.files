@@ -1,5 +1,5 @@
 #!/bin/zsh
-# (c) 2014-2016 Taeyeon Mori
+# (c) 2014-2018 Taeyeon Mori
 # vim: ft=sh:ts=2:sw=2:et
 
 AUR_DEFAULT_HOST="https://aur.archlinux.org/"
@@ -51,6 +51,8 @@ function check_bool {
 
 # ------------------------------------------------------------------------------
 # Parse commandline: anything prefixed with - is a makepkg option, others are package names
+PROG="$0"
+
 packages=()
 makepkg_args=()
 
@@ -60,6 +62,7 @@ ASK=false
 AUR_HOST="$AUR_DEFAULT_HOST"
 ADD_UPDATES=false
 ADD_SCMPKGS=false
+ADD_PYTHON=false
 RECURSE_DEPS=false
 NEED_COWER=false
 NEED_ROOT=false
@@ -131,6 +134,10 @@ process_arg() {
       ADD_UPDATES=true;;
     -g|--scm-packages|--scm-update)
       ADD_SCMPKGS=true;;
+    --python-update)
+      ADD_PYTHON=true
+      NEEDED=false
+      add_makepkg_arg -f;;
     -S|--recurse-deps)
       NEED_COWER=true
       RECURSE_DEPS=true
@@ -141,7 +148,7 @@ process_arg() {
     -E|--ignore-errors)
       IGNORE_ERRORS=true;;
     -h|--help)
-      echo "Usage $0 [-h|-u] [-S] [-L|-X] [makepkg options] <packages>"
+      echo "Usage $PROG [options] <packages>"
       echo "Taeyeon's aur.sh (c) 2014-2016 Taeyeon Mori (not related to http://aur.sh)"
       echo
       echo "A simple AUR client realized in zsh"
@@ -151,6 +158,10 @@ process_arg() {
       echo "  -u, --update  Build all updated AUR packages [c]"
       echo "  -g, --scm-update, --scm-packages"
       echo "                Try to rebuild all *-git packages"
+      echo "  --python-update"
+      echo "                Rebuild all python-* packages after new python release"
+      echo "                Equivalent to: $PROG -f \`pacman -Qm | grep 'python-.\\+'\`"
+      echo "                Note: Doesn't honor AURSH_IGNORE_UPDATES"
       echo "  -S, --recurse-deps"
       echo "                Recursively build & install all dependencies [c]"
       echo "                Implies -i (Auto-install built packages)"
@@ -167,7 +178,7 @@ process_arg() {
       echo "  -1            Short for '--threads -1'"
       echo "  -a, --ask     Review changes before building packages"
       echo "  --exclude <pkgs>"
-      echo "                Exclude packages from -u"
+      echo "                Exclude packages (Useful with -u, -g, --python-update)"
       echo "  --no-custom   Don't use custom packages from $CUSTOMDIR"
       echo "  --noclean     Don't clean up temporary build directory when done."
       echo
@@ -191,7 +202,7 @@ process_arg() {
       echo "  -f, --force   Force rebuilding of built packages. Implies --reinstall"
       echo "  --no-         Negate options: --no-asdeps --no-noconfirm"
       echo
-      echo "NOTE: options marked [c] require cower to be installed (\$ aur.sh -is cower)"
+      echo "NOTE: options marked [c] require cower to be installed (\$ $PROG -is cower)"
       echo "      However, certain cower-only features are automatically enabled when cower is found."
       exit 0
       ;;
@@ -498,7 +509,7 @@ if $ADD_UPDATES; then
   declare -a updates
 
   for update in "${(f)$(cower -u)}"; do
-    updates=("${updates[@]}" "${${(s: :)update}[2]}")
+    updates+=("${${(s: :)update}[2]}")
   done
 
   msg "[AUR] Updates available for: ${updates[*]}"
@@ -507,23 +518,40 @@ if $ADD_UPDATES; then
     updates=(${updates:|ignore})
   fi
 
-  packages=("${updates[@]}" "${packages[@]}")
+  packages+=("${packages[@]}")
 fi
 
-if $ADD_SCMPKGS; then
-  declare -a scmpkgs
+packages_from_filter() {
+  zparseopts -D i=o_ignore a=o_add p:=o_print g:=o_global
 
-  for update in "${(f)$(pacman -Q | grep '.\+-git')}"; do
-    scmpkgs=("${scmpkgs[@]}" "${${(s: :)update}[1]}")
-  done
+  local -a pkgs
 
-  msg "[AUR] Installed scm packages: ${scmpkgs[*]}"
+  pkgs=("${(@f)$(pacman -Qqm | grep "$1")}")
 
-  if (( ${#ignore} )); then
-    updates=(${scmpkgs:|ignore})
+  if [ -n "$o_print" ]; then
+    color 34 printf "${o_print[2]}" "${pkgs[*]}"
   fi
 
-  packages=("${packages[@]}" "${scmpkgs[@]}")
+  if [ -n "$o_ignore" ] && (( ${#ignore} )); then
+    pkgs=(${pkgs:|ignore})
+  fi
+
+  if [ -n "$o_add" ]; then
+    packages+=("${pkgs[@]}")
+  fi
+
+  if [ -n "$o_global" ]; then
+    declare -ga ${o_global[2]}
+    eval "${o_global[2]}=(\"\${(@)pkg}\")"
+  fi
+}
+
+if $ADD_SCMPKGS; then
+  packages_from_filter -ai -p "[AUR] Adding installed scm packages: %s\n" '.\+-git'
+fi
+
+if $ADD_PYTHON; then
+  packages_from_filter -a -p "[AUR] Adding installed python packages: %s\n" 'python-.\+'
 fi
 
 exclude=($(echo $EXCLUDE | tr , " "))
