@@ -82,6 +82,17 @@ if (( $+commands[nvim] )); then
     alias vim=nvim
 fi
 
+#
+# tmux
+#
+function tmux {
+    if [ $# -gt 0 ]; then
+        command tmux "$@"
+    else
+        command tmux new -As default
+    fi
+}
+
 
 #
 # BusyBox
