@@ -220,7 +220,7 @@ def main(argv):
             for output in [o for o in task.outputs if exists(o.filename)]:
                 print("\033[33m  Skipping existing '%s' (--update)\033[0m\033[K" % output.name)
                 task.outputs.remove(output)
-            if not tasks.outputs:
+            if not task.outputs:
                 print("\033[33m  Skipping task '%s' because no output files are left\033[0m\033[K" % task_name(task))
                 tasks.remove(task)
 

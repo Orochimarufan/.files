@@ -123,7 +123,7 @@ def parse_args(argv):
     # Available Options
     parser.add_argument("-v", "--verbose",              help="Enable verbose output",                                               action="store_true")
     parser.add_argument("-q", "--quiet",                help="Be less verbose",                                                     action="store_true")
-    parser.add_argument("-j", "--concurrent",           help="Run ffmpeg concurrently using at most N instances [%(default)s]", metavar="N", default=cpu_count())
+    parser.add_argument("-j", "--concurrent",           help="Run ffmpeg concurrently using at most N instances [%(default)s]", metavar="N", type=int, default=cpu_count())
     profile = parser.add_argument_group("Profile")
     profile.add_argument("-l", "--list-profiles",       help="List profiles and quit",                                              action=ProfilesAction)
     profile.add_argument("-i", "--profile-info",        help="Give info about a profile and quit",          metavar="PROFILE",      action=ProfileInfoAction)

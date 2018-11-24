@@ -518,7 +518,7 @@ if $ADD_UPDATES; then
     updates=(${updates:|ignore})
   fi
 
-  packages+=("${packages[@]}")
+  packages+=("${updates[@]}")
 fi
 
 packages_from_filter() {
