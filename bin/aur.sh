@@ -675,7 +675,7 @@ done
 
 
 if (( ${#FAILED_PKGS} )); then
-  warn "[AUR] All done, but some packages encountered errors (${#FAILED_PKGS}: ${FAILED_PKGS[*]}"
+  warn "[AUR] All done, but some packages encountered errors (${#FAILED_PKGS}): ${FAILED_PKGS[*]}"
   clean_exit 255
 fi
 
