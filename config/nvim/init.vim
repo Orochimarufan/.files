@@ -19,6 +19,19 @@ Plug 'vim-airline/vim-airline'
 " Style
 Plug 'exitface/synthwave.vim'
 
+" Rust
+Plug 'rust-lang/rust.vim'
+
+Plug 'autozimu/languageClient-neovim', {
+    \ 'branch': 'next',
+    \ 'do': 'bash install.sh',
+    \ }
+
+" Misc
+Plug 'junegunn/fzf'
+
+Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
+
 call plug#end()
 
 " User interface
@@ -99,4 +112,17 @@ set textwidth=500 "tw
 """"""""""""""""""""""""""""""""""""""""""""""""""
 set switchbuf=useopen,usetab,newtab
 set showtabline=2
+
+" Rust
+""""""""""""""""""""""""""""""""""""""""""""""""""
+let g:LanguageClient_serverCommands = {
+    \ 'rust': ['rustup', 'run', 'stable', 'rls'],
+    \ }
+
+"noremap <leader>rn :call LanguageClient#textDocument_rename()<CR>
+noremap <leader>ct :call LanguageClient#textDocument_contextMenu()<CR>
+
+" Use deoplete.
+let g:deoplete#enable_at_startup = 1
+inoremap <expr><tab> pumvisible() ? "\<c-n>" : "\<tab>"
 
