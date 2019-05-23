@@ -70,6 +70,18 @@ if [[ ! -f "${PREFIX:-/usr}/share/terminfo/${TERM:0:1}/$TERM" ]]; then
     fi
 fi
 
+#
+# KDE
+#
+export KDE_DEVEL_HOME=$HOME/Development/KDE
+if [ -d "$KDE_DEVEL_HOME" ]; then
+    if [ -d "$KDE_DEVEL_HOME/kdesrc-build" ]; then
+        KDE_SRC_BUILD="$KDE_DEVEL_HOME/kdesrc-build"
+    fi
+else
+    unset KDE_DEVEL_HOME
+fi
+
 
 #
 # Paths
@@ -85,6 +97,7 @@ path=(
   $HOME/.local/bin
   $DOTFILES/bin
   $HOME/junest/bin
+  $KDE_SRC_BUILD
   /usr/local/{bin,sbin}
   $path
 )

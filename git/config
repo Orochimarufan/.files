@@ -4,12 +4,29 @@
 [push]
     default = simple
 
+[merge]
+    tool = kdiff3
+
+[includeIf "gitdir:~/Development/KDE/"]
+    path = "kde.local"
+
+# -----------------------------------------------
+# Remotes
+# -----------------------------------------------
+# GitHub
 [url "https://github.com/"]
     insteadOf = git://github.com/
+    insteadOf = gh:
 
-#[url "git@github.com:"]
-#	insteadOf = git://github.com/
-#	insteadOf = https://github.com/
+[url "git@github.com:"]
+	pushInsteadOf = git://github.com/
+	pushInsteadOf = https://github.com/
+    pushInsteadOf = gh:
 
-[url "https://aur.archlinux.org/"]
-    insteadOf = https://aur4.archlinux.org/
+# KDE
+[url "https://anongit.kde.org/"]
+    insteadOf = kde:
+
+[url "git@git.kde.org:"]
+    pushInsteadOf = kde:
+
