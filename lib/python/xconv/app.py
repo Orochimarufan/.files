@@ -99,7 +99,7 @@ def create_task(aav, profile, inputs, args, filename_from=None):
     filename_from = filename_from or inputs[0]
 
     if not is_advanced_task_profile:
-        fmt = advancedav.DEFAULT_CONTAINER
+        fmt = None
         ext = None
         if "output" in profile.features:
             fmt, ext = profile.features["output"]
@@ -166,7 +166,8 @@ def main(argv):
     if args.quiet:
         aav.global_conv_args = "-loglevel", "warning"
 
-    aav.global_args += "-hide_banner", "-stats"
+    aav.global_args += "-hide_banner",
+    aav.global_conv_args += "-stats",
 
     # Collect Tasks
     tasks = []

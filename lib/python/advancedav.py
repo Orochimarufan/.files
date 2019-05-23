@@ -6,7 +6,7 @@ AdvancedAV FFmpeg commandline generator v3.0 [Library Edition]
     It can automatically parse input files with the help of FFmpeg's ffprobe tool (WiP)
     and allows programatically mapping streams to output files and setting metadata on them.
 -----------------------------------------------------------
-    Copyright 2014-2017 Taeyeon Mori
+    Copyright 2014-2019 Taeyeon Mori
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -37,11 +37,9 @@ from pathlib import Path, PurePath
 
 __all__ = "AdvancedAVError", "AdvancedAV", "SimpleAV", "MultiAV"
 
-version_info = 2, 99, 7
+version_info = 2, 99, 8
 
 # Constants
-DEFAULT_CONTAINER = "matroska"
-
 S_AUDIO = "a"
 S_VIDEO = "v"
 S_SUBTITLE = "s"
@@ -784,16 +782,16 @@ class OutputFile(File, ObjectWithMetadata):
     Holds information about an output file
     """
     __slots__ = "task", "container", "_mapped_sources", "metadata"
-    
+
     local_option_names = ("reorder_streams",) + File.local_option_names
 
     stream_factory = staticmethod(output_stream_factory)
 
-    def __init__(self, task: "Task", name: str, container=DEFAULT_CONTAINER,
+    def __init__(self, task: "Task", name: str, container=None,
             options: Mapping=None, metadata: Mapping=None):
         super().__init__(name, options=options, metadata=metadata)
 
-        self.options.setdefault("c", "copy")
+        #self.options.setdefault("c", "copy")
         self.options.setdefault("reorder_streams", True)
 
         self.task = task
@@ -1153,7 +1151,7 @@ class Task(BaseTask):
         return file
 
     # -- Manage Outputs
-    def add_output(self, filename: str, container: str=DEFAULT_CONTAINER, options: Mapping=None) -> OutputFile:
+    def add_output(self, filename: str, container: str=None, options: Mapping=None) -> OutputFile:
         """ Add an output file
 
         NOTE: Contrary to add_input this will NOT take an OutputFile instance and return it.
@@ -1187,7 +1185,7 @@ class SimpleTask(Task):
     All members of the OutputFile can be accessed on the SimpleTask directly, as well as the usual Task methods.
     Usage of add_output should be avoided however, because it would lead to confusion.
     """
-    def __init__(self, pp: "AdvancedAV", filename: str, container: str=DEFAULT_CONTAINER, options: Mapping=None):
+    def __init__(self, pp: "AdvancedAV", filename: str, container: str=None, options: Mapping=None):
         super().__init__(pp)
 
         self.output = self.add_output(filename, container, options)
@@ -1238,7 +1236,7 @@ class AdvancedAV(metaclass=ABCMeta):
         """
         return Task(self)
 
-    def create_job(self, filename: str, container: str=DEFAULT_CONTAINER, options: Mapping=None) -> SimpleTask:
+    def create_job(self, filename: str, container: str=None, options: Mapping=None) -> SimpleTask:
         """
         Create a simple AdvandecAV task
         :param filename: str The resulting filename
@@ -1349,9 +1347,9 @@ class SimpleAV(AdvancedAV):
         return out.decode("utf-8", "replace")
 
     def probe_file(self, file, *, ffprobe_args_hint=None):
-        probe = self.call_probe(tuple(FFmpeg.argv_options(file.options))
-                                    + ffprobe_args_hint
-                                    + ("-i", file.filename))
+        probe = self.call_probe(ffprobe_args_hint
+                                + tuple(FFmpeg.argv_options(file.options))
+                                + ("-i", file.filename))
         return json.loads(probe)
 
 
@@ -1383,7 +1381,7 @@ class MultiAV(SimpleAV):
         while self.queue:
             self.manage_workers()
             sleep(.250)
-    
+
     def manage_workers(self):
         """
         Make a single run over available workers and see to it that they have work if available
