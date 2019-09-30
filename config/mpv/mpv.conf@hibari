@@ -1,0 +1,12 @@
+# Audio spec
+audio-format=s32
+audio-samplerate=48000
+gapless-audio=yes
+
+# HQ
+profile=gpu-hq
+
+# Then again, not so much...
+hwdec=auto
+cscale=bilinear
+

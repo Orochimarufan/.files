@@ -1,0 +1,32 @@
+# Known YouTube Formats:
+# Audio:
+# 251 Opus 160
+# 250 Opus 64
+# 249 Opus 48
+# 140 AAC 128
+# Video:
+# 337 VP9/2 2160p60 HDR
+# 336 VP9/2 1440p60 HDR
+# 335 VP9/2 1080p60 HDR
+# 334 VP9/2 720p60 HDR
+# 303 VP9 1080p60
+# 302 VP9 720p60
+# 272 VP9 4320p
+# 313 VP9 2160p @sd
+# 271 VP9 1440p
+# 248 VP9 1080p
+# 247 VP9 720p
+# 244 VP9 480p
+# 299 AVC 1080p60
+#
+# Formats: Prefer AVC + Opus
+#   Hibari can't handle VP9 or 60fps
+--format '(bestvideo[vcodec=h264][fps<?60][height<=?1200]/bestvideo[fps<?60])+(bestaudio[acodec=opus]/bestaudio)/best[vcodec=h264][fps<?60][height<=?1200]/best[fps<?60]'
+# Keep record of already downloaded files in a folder
+--download-archive ".youtube-dl"
+# Post-Processing
+--use-aavpp
+--recode-video mkv
+--embed-subs
+--add-metadata
+
