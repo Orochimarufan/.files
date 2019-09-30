@@ -1,5 +1,7 @@
 /zsh/.*
-user-info
+/etc/user-info
+/git/user-info
+/etc/hostname
 *.local
 __pycache__
 *.pyc

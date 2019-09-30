@@ -59,7 +59,7 @@ function relink() {
     [[ ! -e "$1" ]] && err "No such file or directory: '$1'" && return 1
     [[ -L "$2" ]] && rm -f "$2"
     [[ -e "$2" ]] && ! $OVERWRITE && err "File already exists and isn't a symbolic link: '$2'" && return 1
-    color 31 ln -s "$(relpath "$1" "$(dirname "$2")")" "$2"
+    color 31 ln -sr "$1" "$2"
 }
 
 
@@ -72,16 +72,22 @@ git submodule update --init --recursive
 # Ask questions about user
 $ASK && msg "Asking questions..." || err "Not asking any questions:"
 
+# Try to load previous configuration
 [[ -e "$DOT/etc/user-info" ]] && source "$DOT/etc/user-info"
+[[ -e "$DOT/etc/hostname" ]] && HOSTNAME=`cat "$DOT/etc/hostname"`
 
+# Retrieve realname from /etc/passwd GECOS
 [[ -z "$REALNAME" ]] && REALNAME=`grep "^$USER:[^:]*:$UID:" /etc/passwd | cut -d: -f5 | cut -d, -f1`
+[[ -z "$HOSTNAME" ]] && HOSTNAME=`hostname`
 
 if $ASK; then
     ask "  Real name" REALNAME
     ask "  E-Mail address" EMAIL
+    ask "  Computer name" HOSTNAME
 else
     color 36 echo "  default REALNAME=\"$REALNAME\""
     color 36 echo "  default EMAIL=\"$EMAIL\""
+    color 36 echo "  default HOSTNAME=\"$HOSTNAME\""
 fi
 
 # Write down answers
@@ -91,39 +97,101 @@ REALNAME="$REALNAME"
 EMAIL="$EMAIL"
 EOF
 
+color 32 echo "  Writing etc/hostname"
+echo $HOSTNAME >"$DOT/etc/hostname"
+
+# Handle local-only alternatives
+HOST_LC=${(L)HOSTNAME}
+
+function refset() {
+    eval "$1=\$2"
+}
+
+function inspect_name() {
+    # gimme namerefs...
+    #local -n name=$1 prio=$2
+    #local filename=$3
+    # Check local-only files
+    refset $1 ${3%.local}
+    if [[ ${(P)1} != $3 ]]; then
+        refset $2 3
+        return 0
+    fi
+    # Check hostname-specific file
+    refset $1 ${3%@*}
+    if [[ ${(P)1} != $3 ]]; then
+        refset $2 2
+        [[ ${3##*@} == $HOST_LC ]]
+        return $?
+    fi
+    # Standard file
+    refset $2 1
+    return 0
+}
+
+function add_names() {
+    local an_name an_prio
+    #local -n names=$1 prios=$2
+    for an_file in ${(@)argv[3,$#]}; do
+        if inspect_name an_name an_prio $an_file && [[ $an_prio -gt ${${(P)2}[$an_name]} ]]; then
+            refset $1\[\$an_name\] $an_file
+            refset $2\[\$an_name\] $an_prio
+        fi
+    done
+}
 
 # Write files to $HOME
 # =============================
 # Setup dotfiles
 msg "Linking dotfiles..."
-for file in "$DOT/dotfiles"/*; do
-    NAM="${file:t}"
-    color 32 echo "  Adding .$NAM"
-    relink "$file" "$HOME/.$NAM"
-done
+(){
+    local -A names prios
+    pushd $DOT/dotfiles
+    add_names names prios *
+    for name src in ${(@kv)names}; do
+        color 32 echo "  Adding .$name"
+        relink $src $HOME/.$name
+    done
+    popd
+}
 
 # Setup .config
 : ${XDG_CONFIG_HOME:=~/.config}
 msg "Linking .config files... ($XDG_CONFIG_HOME)"
-(
-    cd "$DOT/config"
-    for dir in $(find . -type d); do
-        if [ ! -d "$XDG_CONFIG_HOME/$dir" ]; then
-            color 32 echo "  Creating ${dir:2}"
-            mkdir "$XDG_CONFIG_HOME/$dir"
-        fi
-    done
-    for file in $(find . -type f -o -type l); do
-        file="${file:2}"
-        color 32 echo "  Adding $file"
-        if [[ -L "$file" ]]; then
-            cp -P "$file" "$XDG_CONFIG_HOME/$file"
+(){
+    function relink_r() {
+        local target=$1 dest=$2 name=${3:-$2} from
+        [[ ${target:t} != ${dest:t} ]] && from=" (${target:t})"
+        if [[ ! -d $target ]]; then
+            color 32 echo "  Adding $name$from"
+            if [[ -L $target ]]; then
+                cp -P $target $dest
+            else
+                relink $target $dest
+            fi
         else
-            relink "$DOT/config/$file" "$XDG_CONFIG_HOME/$file"
+            if [[ ! -d $dest ]]; then
+                color 32 echo "  Creating directory $name/$from"
+                mkdir $dest
+            elif [[ -n $from ]]; then
+                color 32 echo "  Adding directory $name/$from"
+            fi
+            # This is still slightly ugly
+            local -A names prios
+            add_names names prios $target/*
+            for dst src in ${(@kv)names}; do
+                relink_r $src $dest/${dst:t} $name/${dst:t}
+            done
         fi
+    }
+    pushd $DOT/config
+    local -A names prios
+    add_names names prios *
+    for dst src in ${(@kv)names}; do
+        relink_r $src $XDG_CONFIG_HOME/$dst $dst
     done
-)
-
+    popd
+}
 
 # Setup git
 # =============================
