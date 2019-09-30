@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+
+import subprocess
+
+from PyQt5 import QtCore, QtDBus, QtWidgets
+from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot, pyqtProperty as Property, Q_CLASSINFO
+
+
+KSCREEN_OUTPUT = "DSI-1"
+XINPUT_TOUCH = "silead_ts"
+
+
+IIO_BUSNAME = "net.hadess.SensorProxy"
+IIO_OBJPATH = "/net/hadess/SensorProxy"
+
+IIO_TO_KSCREEN = {
+    "normal": "none",
+    "right-up": "right",
+    "left-up": "left",
+    "bottom-up": "inverted"
+}
+
+
+# DBus
+class DISensorProxy(QtDBus.QDBusAbstractInterface):
+    HasAccelerometerChanged = Signal(bool)
+    @Property(bool, notify=HasAccelerometerChanged)
+    def HasAccelerometer(self):
+        return self.property("HasAccelerometer")
+    
+    AccelerometerOrientationChanged = Signal(str)
+    @Property(str, notify=AccelerometerOrientationChanged)
+    def AccelerometerOrientation(self) -> str:
+        return self.property("AccelerometerOrientation")
+    
+    
+    def ClaimAccelerometer(self):
+        self.call("ClaimAccelerometer")
+    
+    def ReleaseAccelerometer(self):
+        self.call("ReleaseAccelerometer")
+
+
+    @Slot(QtDBus.QDBusMessage)
+    def _on_properties_changed(self, msg):
+        intf, updated, invald = msg.arguments()
+        updated = dict(updated)
+        
+        if "HasAccelerometer" in updated:
+            self.HasAccelerometerChanged.emit(updated["HasAccelerometerChanged"])
+        if "AccelerometerOrientation" in updated:
+            self.AccelerometerOrientationChanged.emit(updated["AccelerometerOrientation"])
+    
+    def __init__(self, service, path, connection, parent=None):
+        super().__init__(service, path, "net.hadess.SensorProxy", connection, parent)
+        if not connection.connect(service, path, "org.freedesktop.DBus.Properties",
+                           "PropertiesChanged", ["net.hadess.SensorProxy"], "sa{sv}as",
+                           self._on_properties_changed):
+            raise RuntimeError("Could not connect to PropertiesChanged")
+
+
+class DARotated(QtDBus.QDBusAbstractAdaptor):
+    Q_CLASSINFO("D-Bus Interface", "me.sodimm.oro.Rotated")
+    
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+        
+        app.orientationChanged.connect(self.ScreenTurned)
+    
+    ScreenTurned = Signal(str)
+    
+    @Property(str)
+    def Orientation(self):
+        return self.app.orientation
+    
+    @Property(bool)
+    def AutoTurn(self):
+        return self.app.turn_enabled
+    
+    @AutoTurn.write
+    def AutoTurn(self, val):
+        self.app.set_turn_enabled(val)
+    
+    @Slot(str, result=bool)
+    def Turn(self, orientation):
+        if orientation in ("none", "right", "left", "inverted"):
+            self.app.turn_screen(orientation)
+            return True
+        return False
+    
+    @Slot()
+    def Quit(self):
+        self.app.qapp.quit()
+
+
+# App Logic
+class Main(QtCore.QObject):
+    def __init__(self, argv):
+        super().__init__()
+        #self.qapp = QtCore.QCoreApplication(argv)
+        self.qapp = QtWidgets.QApplication(argv)
+        self.qapp.setApplicationName("iio-rotated")
+        self.qapp.setApplicationDisplayName("Screen Rotation")
+        
+        # TODO: Figure out initial orientation
+        self.orientation = None
+        self.turn_enabled = True
+
+    # Turning
+    orientationChanged = Signal(str)
+
+    def turn_screen(self, orientation):
+        """
+        Turn the Display into a different orientation
+        @param orientation The KScreen orientation (none|right|left|inverted)
+        """
+        subprocess.check_call(["kscreen-doctor", "output.%s.rotation.%s" % (KSCREEN_OUTPUT, orientation)])
+        subprocess.check_call(["xinput", "--map-to-output", XINPUT_TOUCH, KSCREEN_OUTPUT])
+        self.orientation = orientation
+        self.orientationChanged.emit(orientation)
+
+    # Auto-Turning
+    def on_device_turned(self, direction):
+        print("Device Turned", direction)
+        if self.turn_enabled:
+            self.turn_screen(IIO_TO_KSCREEN[direction])
+    
+    def set_turn_enabled(self, v):
+        self.turn_enabled = v
+        self.turn_enabled_changed.emit(v)
+    
+    turn_enabled_changed = Signal(bool)
+    
+    def on_systray_clicked(self, reason):
+        print("Activated", reason)
+        # TODO: this should change the Icon
+        #if reason == QtWidgets.QSystemTrayIcon.Trigger:
+        #    self.set_turn_enabled(not self.turn_enabled)
+        
+    # Main
+    def main(self):
+        # Set up Session Bus
+        self.session_bus = QtDBus.QDBusConnection.sessionBus()
+        
+        if not self.session_bus.isConnected():
+            raise RuntimeError("Not connected to Session Bus")
+        
+        if not self.session_bus.registerService("me.sodimm.oro.Rotated"):
+            raise RuntimeError("Could not register D-Bus Service. Maybe another instance is already running")
+        
+        self.adaptor = DARotated(self)
+        self.session_bus.registerObject("/Rotated", self)
+    
+        # Connect to System Bus
+        self.system_bus = QtDBus.QDBusConnection.systemBus()
+
+        if not self.system_bus.isConnected():
+            raise RuntimeError("Not connected to System Bus")
+    
+        # Look for iio-sensor-proxy
+        iio = DISensorProxy(IIO_BUSNAME, IIO_OBJPATH, self.system_bus)
+
+        if not iio.HasAccelerometer:
+            raise RuntimeError("No accelerometer reported")
+ 
+        # Set up System Tray Icon
+        # TODO: Directly work with StatusNotifierItem API?
+        self.systray = QtWidgets.QSystemTrayIcon(self)
+        #self.systray.setToolTip("Screen Orientation")
+
+        self.menu = QtWidgets.QMenu()
+        action = self.menu.addAction("Auto-Turn")
+        action.setCheckable(True)
+        action.setChecked(self.turn_enabled)
+        self.turn_enabled_changed.connect(lambda v, action=action: action.setChecked(v))
+        action.triggered.connect(lambda c: self.set_turn_enabled(c))
+        self.menu.addSeparator()
+        for label, direction in (("Normal", "none"),
+                                 ("Anti-CW", "right"),
+                                 ("Clockwise", "left"),
+                                 ("Upside-Down", "inverted")):
+            action = self.menu.addAction("Turn %s" % label)
+            action.triggered.connect(lambda *a, d=direction: self.turn_screen(d))
+            action.setEnabled(not self.turn_enabled)
+            self.turn_enabled_changed.connect(lambda v, action=action: action.setEnabled(not v))
+        self.menu.addSeparator()
+        action = self.menu.addAction("Quit")
+        action.triggered.connect(self.qapp.quit)
+        self.systray.setContextMenu(self.menu)
+        
+        self.systray.activated.connect(self.on_systray_clicked)
+        self.systray.show()
+    
+        # Run
+        iio.ClaimAccelerometer()
+    
+        iio.AccelerometerOrientationChanged.connect(self.on_device_turned)
+    
+        try:
+            self.qapp.exec()
+        finally:
+            iio.ReleaseAccelerometer()
+    
+
+
+if __name__ == "__main__":
+    import sys
+    Main(sys.argv).main()
