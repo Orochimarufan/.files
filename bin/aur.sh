@@ -64,7 +64,7 @@ ADD_UPDATES=false
 ADD_SCMPKGS=false
 ADD_PYTHON=false
 RECURSE_DEPS=false
-NEED_COWER=false
+NEED_AURACLE=false
 NEED_ROOT=false
 LIST_ONLY=false
 IGNORE_ERRORS=false
@@ -130,7 +130,7 @@ process_arg() {
     -1)
       export MAKEPKG_MAKETHREADS=$[`nproc` - 1];;
     -u|--update)
-      NEED_COWER=true
+      NEED_AURACLE=true
       ADD_UPDATES=true;;
     -g|--scm-packages|--scm-update)
       ADD_SCMPKGS=true;;
@@ -139,7 +139,7 @@ process_arg() {
       NEEDED=false
       add_makepkg_arg -f;;
     -S|--recurse-deps)
-      NEED_COWER=true
+      NEED_AURACLE=true
       RECURSE_DEPS=true
       NEED_ROOT=true
       add_makepkg_arg -i;;
@@ -202,8 +202,8 @@ process_arg() {
       echo "  -f, --force   Force rebuilding of built packages. Implies --reinstall"
       echo "  --no-         Negate options: --no-asdeps --no-noconfirm"
       echo
-      echo "NOTE: options marked [c] require cower to be installed (\$ $PROG -is cower)"
-      echo "      However, certain cower-only features are automatically enabled when cower is found."
+      echo "NOTE: options marked [c] require auracle to be installed (\$ $PROG -is auracle-git)"
+      echo "      However, certain auracle-only features are automatically enabled when auracle is found."
       exit 0
       ;;
     # Clean up files from failed operations
@@ -276,34 +276,34 @@ done
 $NEEDED && add_makepkg_arg "--needed"
 $NOCONFIRM && add_makepkg_arg "--noconfirm"
 
-# Cower Detection
-USE_COWER=false
+# Auracle Detection
+USE_AURACLE=false
 
-if cower --version >/dev/null; then
-  USE_COWER=true # Auto-enable cower support if installed.
-elif $NEED_COWER; then
-  throw 31 "Options requiring cower have been selected but cower was not found."
+if auracle --version >/dev/null; then
+  USE_AURACLE=true # Auto-enable auracle support if installed.
+elif $NEED_AURACLE; then
+  throw 31 "Options requiring auracle have been selected but auracle was not found. Install auracle-git from AUR."
 else
-  warn "Could not detect cower on the system."
+  warn "Could not detect auracle on the system."
 fi
 
 if [ "$aur_get" != "aur_get_aur4" ] || [ "$AUR_HOST" != "$AUR_DEFAULT_HOST" ]; then
-  USE_COWER=false
-  $NEED_COWER &&
-    throw 31 "--old-aur and --aur-host are currently not supported with cower features" ||
-    warn "Features depending on cower cannot be used with --old-aur and --aur-host. Disabling them."
+  USE_AURACLE=false
+  $NEED_AURACLE &&
+    throw 31 "--old-aur and --aur-host are not supported with auracle features" ||
+    warn "--old-aur and --aur-host are no longer supported"
 fi
 
-if ! $USE_COWER; then
-  warn "Cower will not be used. Not all features are available without it."
-  warn "Specifically, split packages cannot be detected without cower."
+if ! $USE_AURACLE; then
+  warn "Auracle will not be used. Not all features are available without it."
+  warn "Specifically, split packages cannot be detected without auracle."
 fi
 
 
 # -------------------------------------------------------------------------
 # aur functions
 aur_get_old() {
-  [ -d "$1/.git" ] && err "Local copy of $1 is a Git clone from AUR v4. Don't use --old-aur with it!" && return 32
+  [ -d "$1/.git" ] && throw 32 "Local copy of $1 is a Git clone from AUR v4. Don't use --old-aur with it!"
   curl "$AUR_HOST/packages/${1:0:2}/$1/$1.tar.gz" | tar xz
 }
 
@@ -355,7 +355,7 @@ parse_pkgbuild() {
 
 collect_package() {
   local p="$1" # package name
-  local COWER_INFO="$2"
+  local INFO="$2"
 
   # Skip dupes (prob. from dependencies)
   if (( $AFFECTED_PKGS[(I)$p] )); then
@@ -372,15 +372,15 @@ collect_package() {
     PKG_INFO[$p:From]="$CUSTOMDIR/$p"
     parse_pkgbuild "$p" "$CUSTOMDIR/$p/PKGBUILD"
   else
-    if $USE_COWER; then
-      if [ -z "$COWER_INFO" ]; then
-        COWER_INFO=`cower -i "$p"`
+    if $USE_AURACLE; then
+      if [ -z "$INFO" ]; then
+        INFO=`auracle info "$p"`
       fi
 
-      PKG_INFO[$p:CowerInfo]="$COWER_INFO"
+      PKG_INFO[$p:Info]="$INFO"
 
       info_grep() {
-        echo "$COWER_INFO" | grep "$@" | cut -d: -f2
+        echo "$INFO" | grep "$@" | cut -d: -f2
       }
 
       PKG_INFO[$p:PackageBase]=`info_grep PackageBase | sed -e 's/^\s*//' -e 's/\s*$//'`
@@ -392,8 +392,8 @@ collect_package() {
   # Check for split package
   if [ -n "$PKG_INFO[$p:PackageBase]" ]; then
     color 35 echo "[AUR] $p: Is a split package. Selecting base package '$PKG_INFO[$p:PackageBase]' instead."
-    warn "[AUR] Operations on specific sub-packages require the base package to be specified along with --pkg."
-    collect_package "$PKG_INFO[$p:PackageBase]" "`echo "$PKG_INFO[$p:CowerInfo]" | grep -v PackageBase`"
+    warn "[AUR] Split-Package support is currently broken."
+    collect_package "$PKG_INFO[$p:PackageBase]" "`echo "$PKG_INFO[$p:Info]" | grep -v PackageBase`"
     return $?
   fi
 
@@ -434,7 +434,7 @@ collect_package() {
       if (( $packages[(I)$dep] )); then # make sure queued dependencies are processed before dependants, even if a version is already installed
         collect_package "$dep"
       fi
-      if $RECURSE_DEPS && ! pacman -Qi "$dep" >/dev/null 2>&1 && cower -i "$dep" >/dev/null 2>&1; then # Check if it's an (un-installed) aur package
+      if $RECURSE_DEPS && ! pacman -Qi "$dep" >/dev/null 2>&1 && auracle info "$dep" >/dev/null 2>&1; then # Check if it's an (un-installed) aur package
         color 35 echo "[AUR] $p: Collecting AUR dependency '$dep'..."
         collect_package "$dep"
         # Mark as dependency
@@ -508,9 +508,10 @@ fi
 if $ADD_UPDATES; then
   declare -a updates
 
-  for update in "${(f)$(cower -u)}"; do
-    updates+=("${${(s: :)update}[2]}")
-  done
+  updates=($(auracle outdated -q))
+  #for update in "${(f)$(auracle outdated)}"; do
+  #  updates+=("${${(s: :)update}[2]}")
+  #done
 
   msg "[AUR] Updates available for: ${updates[*]}"
 
