@@ -61,12 +61,31 @@ fi
 
 #
 # Terminfo
+# Detect missing profiles and try to fall back
 #
-if [[ ! -f "${PREFIX:-/usr}/share/terminfo/${TERM:0:1}/$TERM" ]]; then
-    if [[ "${TERM:0:7}" == "konsole" ]] || echo $TERM | grep -q 256color; then
-        export TERM=xterm-256color
+_zp_terminfo_paths=("$HOME/.terminfo" "/etc/terminfo" "/lib/terminfo" "/usr/share/terminfo")
+_zp_terminfo_found=
+_zp_terminfo_name="${TERM:0:1}/$TERM"
+for _zp_terminfo_path in "${_zp_terminfo_paths[@]}"; do
+    if [[ -f "$_zp_terminfo_path/$_zp_terminfo_name" ]]; then
+        _zp_terminfo_found="$_zp_terminfo_path"
+        break
+    fi
+done
+if [ -z "$_zp_terminfo_found" ]; then
+    if [[ "${TERM:0:7}" == "konsole" ]] || echo "$TERM" | grep -q 256color; then
+        _zp_terminfo_color=-256color
     else
-        export TERM=xterm
+        _zp_terminfo_color=
+    fi
+    if [[ "${TERM:0:4}" == "tmux" ]]; then
+        _zp_terminfo_base=screen
+    else
+        _zp_terminfo_base=xterm
+    fi
+    export TERM=$_zp_terminfo_base$_zp_terminfo_color
+    if [[ -o INTERACTIVE || -o SHIN_STDIN ]]; then
+        echo "NOTE: Falling back to TERM=$TERM (terminfo/$_zp_terminfo_name not found)" >&2
     fi
 fi
 
@@ -99,6 +118,7 @@ path=(
   $HOME/junest/bin
   $KDE_SRC_BUILD
   /usr/local/{bin,sbin}
+  /snap/bin
   $path
 )
 
