@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 # Parse Steam/Source VDF Files
 # Reference: https://developer.valvesoftware.com/wiki/KeyValues#File_Format
-# (c) 2015 Taeyeon Mori; CC-BY-SA
+# (c) 2015-2020 Taeyeon Mori; CC-BY-SA
 
 from __future__ import unicode_literals
 
 import io
+
+from typing import Dict, Union
+
+DeepDict = Dict[str, Union[str, "DeepDict"]]
 
 
 class VdfParser:
@@ -113,13 +117,13 @@ class VdfParser:
                 else:
                     current.append(c)
 
-    def parse(self, fd):
+    def parse(self, fd) -> DeepDict:
         """
         Parse a VDF file into a python dictionary
         """
         return self._parse_map(fd)
 
-    def parse_string(self, content):
+    def parse_string(self, content) -> DeepDict:
         """
         Parse the content of a VDF file
         """
@@ -137,7 +141,7 @@ class VdfParser:
             def write(str=None, i=False, d=False, nl=False):
                 if str:
                     fd.write(str)
-                if delim:
+                if d:
                     fd.write(" ")
         
         else:
@@ -165,7 +169,7 @@ class VdfParser:
                 write(self._make_literal(v))
             write(d=1, nl=1)
     
-    def write(self, fd, dictionary, *, pretty=True):
+    def write(self, fd, dictionary: DeepDict, *, pretty=True):
         """
         Write a dictionary to a file in VDF format
         """
