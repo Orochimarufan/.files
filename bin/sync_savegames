@@ -19,8 +19,9 @@ sync = SteamSync(Path("~/Nextcloud/Misc/Savegames").expanduser())
 @sync.by_name("zanzarah")
 def zanzarah(op):
     with op.game_directory.prefix("Save") as set:
-        set += "*"
-        set.execute()
+        set += "*.dat"
+        if set.show_confirm():
+            set.execute()
 
 #@sync.by_id(787860)
 def fs19(op):

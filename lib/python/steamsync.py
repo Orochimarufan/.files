@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import Tuple, Dict, List, Union, Set, Callable, Any
 
-from steamutil import Steam, App, CachedProperty
+from steamutil import Steam, App, CachedProperty, MalformedManifestError
 
 
 class AppNotFoundType:
@@ -137,9 +137,11 @@ class SyncSet:
         print("  Target is newer: ", ", ".join(map(str, self.files_from_target)))
         print("  Unmodified: ", ", ".join(map(str, self.files_unmodified)))
 
-        print("Press enter to continue")
-        input()
-        return True # TODO: Proper thingey
+        print("Continue? <Y/n> ", end="")
+        resp = input().strip()
+        if resp.lower() in ("y", "yes", ""):
+            return True
+        return False
 
     def execute(self, *, make_inconsistent=False) -> bool:
         operations = []

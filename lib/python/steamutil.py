@@ -77,6 +77,12 @@ class DictPathProperty(DictPathRoProperty):
 _vdf = VdfParser()
 
 
+class MalformedManifestError(Exception):
+    @property
+    def filename(self):
+        return self.args[1]
+
+
 class App:
     steam: 'Steam'
     library_folder: 'LibraryFolder'
@@ -95,6 +101,9 @@ class App:
                 self.manifest = _vdf.parse(f)
         else:
             self.manifest = manifest_data
+
+        if "AppState" not in self.manifest:
+            raise MalformedManifestError("App manifest doesn't have AppState key", self.manifest_path)
     
     def __repr__(self):
         return "<steamutil.App %d '%s' @ \"%s\">" % (self.appid, self.name, self.install_path)
@@ -185,7 +194,11 @@ class LibraryFolder:
 
     @property
     def apps(self) -> Iterable[App]:
-        return (App(self, mf) for mf in self.appmanifests)
+        for mf in self.appmanifests:
+            try:
+                yield App(self, mf)
+            except MalformedManifestError as e:
+                print("Warning: Malformed app manifest:", e.filename)
 
     def get_app(self, appid: int) -> Optional[App]:
         manifest = self.steamapps_path / ("appmanifest_%d.acf" % appid)
@@ -309,6 +322,23 @@ class Steam:
                     steamroot = path / name
                     if steamroot.exists():
                         return steamroot
+        elif sys.platform.startswith("win"):
+            try:
+                import winreg
+                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "SOFTWARE\\Valve\\Steam")
+                path, t = winreg.QueryValueEx(key, "steampath")
+                if (t == winreg.REG_SZ):
+                    return Path(path)
+            except WindowsError:
+                pass
+            # try PROGRAMFILES
+            pfiles = (os.environ.get("ProgramFiles(x86)", "C:\Program Files (x86)"),
+                      os.environ.get("ProgramFiles", "C:\Program Files"))
+            for path in pfiles:
+                if path.exists():
+                    path /= "Steam"
+                    if path.exists():
+                        return path
 
     # Various paths
     @property
