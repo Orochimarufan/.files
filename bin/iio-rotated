@@ -1,27 +1,69 @@
 #!/usr/bin/env python3
 
+import os
 import subprocess
 
-from PyQt5 import QtCore, QtDBus, QtWidgets
+from PyQt5 import QtCore, QtGui, QtDBus, QtWidgets
 from PyQt5.QtCore import pyqtSignal as Signal, pyqtSlot as Slot, pyqtProperty as Property, Q_CLASSINFO
 
+if "WAYLAND_DISPLAY" in os.environ:
+    IS_WAYLAND = True
+    KSCREEN_OUTPUT = "unknown DSI-1-unknown"
+else:
+    IS_WAYLAND = False
+    KSCREEN_OUTPUT = "DSI-1"
 
-KSCREEN_OUTPUT = "DSI-1"
 XINPUT_TOUCH = "silead_ts"
+
+
+IIO_TO_KSCREEN = {
+    "normal": "none",
+    "right-up": "left" if IS_WAYLAND else "right",
+    "left-up": "right" if IS_WAYLAND else "left",
+    "bottom-up": "inverted"
+}
+
+KEYBOARD_ORIENTATION = IIO_TO_KSCREEN["right-up"]
 
 
 IIO_BUSNAME = "net.hadess.SensorProxy"
 IIO_OBJPATH = "/net/hadess/SensorProxy"
 
-IIO_TO_KSCREEN = {
-    "normal": "none",
-    "right-up": "right",
-    "left-up": "left",
-    "bottom-up": "inverted"
-}
+KWIN_BUSNAME = "org.kde.KWin"
+KWIN_OBJPATH = "/org/kde/KWin"
 
 
 # DBus
+class DIKWinTabletModeManager(QtDBus.QDBusAbstractInterface):
+    tabletModeAvailableChanged = Signal(bool)
+    @Property(bool, notify=tabletModeAvailableChanged)
+    def tabletModeAvailable(self):
+        return self.property("tabletModeAvailable")
+
+    tabletModeChanged = Signal(bool)
+    @Property(bool, notify=tabletModeChanged)
+    def tabletMode(self):
+        return self.property("tabletMode")
+
+    @Slot(QtDBus.QDBusMessage)
+    def _on_properties_changed(self, msg):
+        intf, updated, invald = msg.arguments()
+        updated = dict(updated)
+
+        if "tabletModeAvailable" in updated:
+            self.tabletModeAvailableChanged.emit(updated["tabletModeAvailable"])
+        if "tabletMode" in updated:
+            self.tabletModeChanged.emit(updated["tabletMode"])
+
+    def __init__(self, service, path, connection, parent=None):
+        super().__init__(service, path, "org.kde.KWin.TabletModeManager", connection, parent)
+
+        if not connection.connect(service, path, "org.freedesktop.DBus.Properties",
+                           "PropertiesChanged", ["org.kde.KWin.TabletModeManager"], "sa{sv}as",
+                           self._on_properties_changed):
+            raise RuntimeError("Could not connect to PropertiesChanged")
+
+
 class DISensorProxy(QtDBus.QDBusAbstractInterface):
     HasAccelerometerChanged = Signal(bool)
     @Property(bool, notify=HasAccelerometerChanged)
@@ -31,8 +73,7 @@ class DISensorProxy(QtDBus.QDBusAbstractInterface):
     AccelerometerOrientationChanged = Signal(str)
     @Property(str, notify=AccelerometerOrientationChanged)
     def AccelerometerOrientation(self) -> str:
-        return self.property("AccelerometerOrientation")
-    
+        return self.property("AccelerometerOrientation") 
     
     def ClaimAccelerometer(self):
         self.call("ClaimAccelerometer")
@@ -81,6 +122,18 @@ class DARotated(QtDBus.QDBusAbstractAdaptor):
     @AutoTurn.write
     def AutoTurn(self, val):
         self.app.set_turn_enabled(val)
+
+    @Property(bool)
+    def TabletModeManager(self):
+        return self.app.tmm_enabled
+
+    @TabletModeManager.write
+    def TabletModeManager(self, val):
+        self.app.set_tmm_enabled(val)
+
+    @Property(bool)
+    def TabletModeManagerAvailable(self):
+        return self.app.tmm is not None
     
     @Slot(str, result=bool)
     def Turn(self, orientation):
@@ -106,6 +159,8 @@ class Main(QtCore.QObject):
         # TODO: Figure out initial orientation
         self.orientation = None
         self.turn_enabled = True
+        self.tmm_enabled = IS_WAYLAND
+        self.tablet_mode = None
 
     # Turning
     orientationChanged = Signal(str)
@@ -115,10 +170,16 @@ class Main(QtCore.QObject):
         Turn the Display into a different orientation
         @param orientation The KScreen orientation (none|right|left|inverted)
         """
-        subprocess.check_call(["kscreen-doctor", "output.%s.rotation.%s" % (KSCREEN_OUTPUT, orientation)])
-        subprocess.check_call(["xinput", "--map-to-output", XINPUT_TOUCH, KSCREEN_OUTPUT])
-        self.orientation = orientation
-        self.orientationChanged.emit(orientation)
+        try:
+            subprocess.check_call(["kscreen-doctor", "output.%s.rotation.%s" % (KSCREEN_OUTPUT, orientation)])
+            if not IS_WAYLAND:
+                subprocess.check_call(["xinput", "--map-to-output", XINPUT_TOUCH, KSCREEN_OUTPUT])
+        except:
+            import traceback
+            traceback.print_exc()
+        else:
+            self.orientation = orientation
+            self.orientationChanged.emit(orientation)
 
     # Auto-Turning
     def on_device_turned(self, direction):
@@ -129,15 +190,30 @@ class Main(QtCore.QObject):
     def set_turn_enabled(self, v):
         self.turn_enabled = v
         self.turn_enabled_changed.emit(v)
+
+    def set_tmm_enabled(self, v):
+        self.tmm_enabled = v
+        self.tmm_enabled_changed.emit(v)
     
     turn_enabled_changed = Signal(bool)
+    tmm_enabled_changed  = Signal(bool)
     
     def on_systray_clicked(self, reason):
         print("Activated", reason)
-        # TODO: this should change the Icon
-        #if reason == QtWidgets.QSystemTrayIcon.Trigger:
-        #    self.set_turn_enabled(not self.turn_enabled)
-        
+        if reason == QtWidgets.QSystemTrayIcon.Trigger:
+            if not self.tmm_enabled:
+                self.set_turn_enabled(not self.turn_enabled)
+    
+    def on_tabletmode(self, v):
+        if self.tmm_enabled:
+            self.set_turn_enabled(v)
+            if v:
+                print("Entered Tablet Mode")
+                #self.turn_screen(IIO_TO_KSCREEN[self.iio.AccelerometerOrientation])
+            else:
+                print("Left Tablet Mode")
+                self.turn_screen(KEYBOARD_ORIENTATION)
+
     # Main
     def main(self):
         # Set up Session Bus
@@ -151,7 +227,16 @@ class Main(QtCore.QObject):
         
         self.adaptor = DARotated(self)
         self.session_bus.registerObject("/Rotated", self)
-    
+
+        try:
+            self.tmm = DIKWinTabletModeManager(KWIN_BUSNAME, KWIN_OBJPATH, self.session_bus)
+        except:
+            print("Could not connect to KWin TabletModeManager")
+            import traceback
+            traceback.print_exc()
+            self.tmm_enabled = False
+            self.tmm = None
+
         # Connect to System Bus
         self.system_bus = QtDBus.QDBusConnection.systemBus()
 
@@ -159,23 +244,39 @@ class Main(QtCore.QObject):
             raise RuntimeError("Not connected to System Bus")
     
         # Look for iio-sensor-proxy
-        iio = DISensorProxy(IIO_BUSNAME, IIO_OBJPATH, self.system_bus)
+        self.iio = iio = DISensorProxy(IIO_BUSNAME, IIO_OBJPATH, self.system_bus)
 
         if not iio.HasAccelerometer:
             raise RuntimeError("No accelerometer reported")
  
         # Set up System Tray Icon
+        self.icon_lock = QtGui.QIcon.fromTheme("emblem-locked")
+        self.icon_turn = QtGui.QIcon.fromTheme("emblem-unlocked")
         # TODO: Directly work with StatusNotifierItem API?
-        self.systray = QtWidgets.QSystemTrayIcon(self)
+        self.systray = QtWidgets.QSystemTrayIcon(self.icon_turn, self)
         #self.systray.setToolTip("Screen Orientation")
 
+        self.turn_enabled_changed.connect(lambda v: self.systray.setIcon(self.icon_turn if v else self.icon_lock))
+
         self.menu = QtWidgets.QMenu()
+        # Tablet Mode detection enable
+        action = self.menu.addAction("Detect Tablet Mode")
+        action.setEnabled(self.tmm is not None)
+        action.setCheckable(True)
+        action.setChecked(self.tmm_enabled)
+        action.triggered.connect(lambda c: self.set_tmm_enabled(c))
+        self.tmm_enabled_changed.connect(lambda c, action=action: action.setChecked(c))
+        # Auto turn enable
         action = self.menu.addAction("Auto-Turn")
         action.setCheckable(True)
         action.setChecked(self.turn_enabled)
-        self.turn_enabled_changed.connect(lambda v, action=action: action.setChecked(v))
+        action.setEnabled(not self.tmm_enabled)
         action.triggered.connect(lambda c: self.set_turn_enabled(c))
+        self.tmm_enabled_changed.connect(lambda v, action=action: action.setEnabled(not v))
+        self.turn_enabled_changed.connect(lambda v, action=action: action.setChecked(v))
+
         self.menu.addSeparator()
+        # Manual turning
         for label, direction in (("Normal", "none"),
                                  ("Anti-CW", "right"),
                                  ("Clockwise", "left"),
@@ -184,13 +285,21 @@ class Main(QtCore.QObject):
             action.triggered.connect(lambda *a, d=direction: self.turn_screen(d))
             action.setEnabled(not self.turn_enabled)
             self.turn_enabled_changed.connect(lambda v, action=action: action.setEnabled(not v))
+
         self.menu.addSeparator()
+        # Quit
         action = self.menu.addAction("Quit")
         action.triggered.connect(self.qapp.quit)
         self.systray.setContextMenu(self.menu)
         
         self.systray.activated.connect(self.on_systray_clicked)
         self.systray.show()
+
+        if self.tmm is not None:
+            #self.tmm.tabletModeAvailableChanged.connect(self.updateTabletModeAvailable)
+            #self.updateTabletModeAvailable(self.tmm.tabletModeAvailable)
+            self.tmm.tabletModeChanged.connect(self.on_tabletmode)
+            self.on_tabletmode(self.tmm.tabletMode)
     
         # Run
         iio.ClaimAccelerometer()
