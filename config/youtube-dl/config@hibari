@@ -21,7 +21,7 @@
 #
 # Formats: Prefer AVC + Opus
 #   Hibari can't handle VP9 or 60fps
---format '(bestvideo[vcodec=h264][fps<?60][height<=?1200]/bestvideo[fps<?60])+(bestaudio[acodec=opus]/bestaudio)/best[vcodec=h264][fps<?60][height<=?1200]/best[fps<?60]'
+--format '(bestvideo[vcodec^=?avc1][fps<?60][height<=?1200]/bestvideo[fps<?60])+(bestaudio[acodec=opus]/bestaudio)/best[vcodec^=?avc1][fps<?60][height<=?1200]/best[fps<?60]'
 # Keep record of already downloaded files in a folder
 --download-archive ".youtube-dl"
 # Post-Processing
