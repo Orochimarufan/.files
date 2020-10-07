@@ -332,8 +332,8 @@ class Steam:
             except WindowsError:
                 pass
             # try PROGRAMFILES
-            pfiles = (os.environ.get("ProgramFiles(x86)", "C:\Program Files (x86)"),
-                      os.environ.get("ProgramFiles", "C:\Program Files"))
+            pfiles = (os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+                      os.environ.get("ProgramFiles", "C:\\Program Files"))
             for path in pfiles:
                 if path.exists():
                     path /= "Steam"
