@@ -48,7 +48,7 @@ class ProtonTool:
             if self.app is None:
                 die(1, "Could not find App #%s." % args.game)
         else:
-            apps = list(self.steam.find_apps(args.game))
+            apps = list(self.steam.find_apps(args.game, installed=not args.show_all))
             if len(apps) > 1:
                 print_error("Found more than one installed game matching /%s/, please be more specific" % args.game)
                 for app in apps:
@@ -90,6 +90,7 @@ class ProtonTool:
         parser.add_argument("game", help="Can be either the appid or a name pattern to look for")
         parser.add_argument("--steam-path", help="Steam install path", default=None)
         parser.add_argument("-l", "--list-tools", action=cls.ListAction, help="List all known compatibility tools")
+        parser.add_argument("-a", "--show-all", action="store_true", default=False, help="Search all games in local appinfo cache")
 
         commands = parser.add_subparsers()
 
@@ -235,10 +236,13 @@ class ProtonTool:
         return os.execvp(self.args.cmdline[0], self.args.cmdline)
     
     def cmd_run(self):
+        """ Run a game executable directly, possibly using a compat tool """
+        # Obviously has to be installed
         if not self.app.installed:
             print_error("App is not installed.")
             return 50
 
+        # Check if we want to use a compat tool
         if self.args.tool:
             tool = {"name": self.args.tool}
         elif self.app.is_proton_app:
@@ -246,14 +250,22 @@ class ProtonTool:
         else:
             tool = None
         
+        # Default to native oslist
+        if sys.platform.startswith("linux"):
+            target_oslist = "linux"
+        elif sys.platform.startswith("win"):
+            target_oslist = "windows"
+
+        # Set up compat tool
         if tool is not None:
+            # XXX: what about other tools? Like Steam Linux Runtime
             if self.args.config:
                 tool["config"] = self.args.config
-            
+
             toolinfo = self.compat_tools[tool["name"]]
 
-            info_tool, info_path = self._format_tool_info(self.steam, tool, toolinfo)
-            
+            info_tool, _ = self._format_tool_info(self.steam, tool, toolinfo)
+
             print_info("Using tool", info_tool)
 
             if self.args.waitforexit:
@@ -264,25 +276,34 @@ class ProtonTool:
             with open(toolinfo["install_path"] / "toolmanifest.vdf") as f:
                 mfst = steamutil._vdf.parse(f)
                 cmdline = mfst["manifest"][verb]
-            
+
             path, *args = cmdline.split()
             path = str(toolinfo["install_path"]) + path
 
             self.setup_proton_env(tool)
 
-            for cfg in self.app.launch_configs:
-                # TODO: Handle multiple
-                if cfg["type"] == "default" and toolinfo.get("from_oslist", "windows") in cfg["config"]["oslist"]:
-                    argv = [path, *args, str(self.app.install_path / cfg["executable"])]
-                    print_info("Executing", " ".join(argv))
-                    return os.execv(path, argv)
-        
+            # Set tool oslist and prepare arguments
+            target_oslist = toolinfo.get("from_oslist", "windows")
+            tool_argv = [path, *args]
         else:
-            # TODO windows support?
-            for cfg in self.app.launch_configs:
-                if cfg["type"] == "default" and "linux" in cfg["config"]["oslist"]:
-                    return os.execv(self.app.install_path / cfg["executable"], [cfg["executable"]])
-    
+            tool_argv = []
+
+        # Read launch configurations
+        for cfg in self.app.launch_configs:
+            # Filter ones that won't work
+            if "type" in cfg and cfg["type"] != "default": continue
+            if "oslist" in cfg and target_oslist not in cfg["oslist"]: continue
+            if "executable" not in cfg: continue
+
+            # Execute
+            game_path = self.app.install_path / cfg["executable"]
+            argv = [*tool_argv, str(game_path)] # TODO: Use Steam user custom args?
+            print_info("Launching", " ".join(argv))
+            os.chdir(game_path.parent)
+            return os.execv(argv[0], argv)
+        else:
+            print_error("No matching launch configuration in appinfo")
+            return 51
     def cmd_proton(self):
         # proton and wine subcommands:
         # Run proton respective wine with arguments

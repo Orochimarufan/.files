@@ -7,7 +7,7 @@ import re, fnmatch, datetime
 from pathlib import Path
 from typing import List, Iterable, Dict, Tuple, Callable, Optional, Union
 
-from vdfparser import VdfParser, DeepDict, AppInfoFile
+from vdfparser import VdfParser, DeepDict, AppInfoFile, LowerCaseNormalizingDict
 
 
 class CachedProperty:
@@ -94,7 +94,10 @@ class AppInfo:
         self.appid = appid
         if appinfo_data is not None:
             self.__dict__["appinfo"] = appinfo_data
-    
+
+    def __repr__(self):
+        return "<steamutil.AppInfo #%7d '%s' (%s)>" % (self.appid, self.name, self.install_dir)
+
     installed   = False
     
     # AppInfo
@@ -106,10 +109,10 @@ class AppInfo:
     @property
     def launch_configs(self):
         return self.appinfo["appinfo"]["config"]["launch"].values()
-    
-    name        = DictPathRoProperty("appinfo", ("appinfo", "common", "name"))
+
+    name        = DictPathRoProperty("appinfo", ("appinfo", "common", "name"), default=None)
     oslist      = DictPathRoProperty("appinfo", ("appinfo", "common", "oslist"), type=lambda s: s.split(","))
-    install_dir = DictPathRoProperty("appinfo", ("appinfo", "config", "installdir"))
+    install_dir = DictPathRoProperty("appinfo", ("appinfo", "config", "installdir"), default=None)
     languages   = DictPathRoProperty("appinfo", ("appinfo", "common", "supported_languages"))
     gameid      = DictPathRoProperty("appinfo", ("appinfo", "common", "gameid"), type=int)
     
@@ -156,7 +159,7 @@ class App(AppInfo):
 
         self.manifest_path = manifest_path
         if manifest_data is None:
-            with open(manifest_path) as f:
+            with open(manifest_path, encoding="utf-8") as f:
                 self.manifest = _vdf.parse(f)
         else:
             self.manifest = manifest_data
@@ -169,8 +172,8 @@ class App(AppInfo):
     installed = True
     
     def __repr__(self):
-        return "<steamutil.App %d '%s' @ \"%s\">" % (self.appid, self.name, self.install_path)
-    
+        return "<steamutil.App     #%7d '%s' @ \"%s\">" % (self.appid, self.name, self.install_path)
+
     # Basic info
     name  = DictPathRoProperty("manifest", ("AppState", "name"))
     language = DictPathRoProperty("manifest", ("AppState", "UserConfig", "language"), None)
@@ -276,7 +279,7 @@ class LibraryFolder:
     def find_apps_re(self, regexp: str) -> Iterable[App]:
         reg = re.compile(r'"name"\s+".*%s.*"' % regexp, re.IGNORECASE)
         for manifest in self.appmanifests: #pylint:disable=not-an-iterable
-            with open(manifest) as f:
+            with open(manifest, encoding="utf-8") as f:
                 content = f.read()
             if reg.search(content):
                 yield App(self, manifest, manifest_data=_vdf.parse_string(content))
@@ -351,7 +354,7 @@ class LoginUser:
     
     @CachedProperty
     def localconfig(self) -> DeepDict:
-        with open(self.localconfig_vdf) as f:
+        with open(self.localconfig_vdf, encoding="utf-8") as f:
             return _vdf.parse(f)
     
     # Game config
@@ -426,8 +429,10 @@ class Steam:
     @CachedProperty
     def most_recent_user(self) -> Optional[LoginUser]:
         try:
-            with open(self.loginusers_vdf) as f:
-                data = _vdf.parse(f)
+            # Apparently, Steam doesn't care about case in the config/*.vdf keys
+            vdf_ci = VdfParser(factory=LowerCaseNormalizingDict)
+            with open(self.loginusers_vdf, encoding="utf-8") as f:
+                data = vdf_ci.parse(f)
             for id, info in data["users"].items():
                 if info["mostrecent"] == "1":
                     return LoginUser(self, int(id), info)
@@ -443,7 +448,7 @@ class Steam:
     # Config
     @CachedProperty
     def config(self) -> DeepDict:
-        with open(self.config_vdf) as f:
+        with open(self.config_vdf, encoding="utf-8") as f:
             return _vdf.parse(f)
     
     config_install_store = DictPathProperty("config", ("InstallConfigStore",))
@@ -485,7 +490,7 @@ class Steam:
                 if c.exists():
                     manifests.append(c)
         for mfst_path in manifests:
-            with open(mfst_path) as f:
+            with open(mfst_path, encoding="utf-8") as f:
                 mfst = _vdf.parse(f)
             for name, t in mfst["compatibilitytools"]["compat_tools"].items():
                 # TODO warn duplicate name
@@ -496,7 +501,7 @@ class Steam:
     # Game/App Library
     @CachedProperty
     def library_folder_paths(self) -> List[Path]:
-        with open(self.libraryfolders_vdf) as f:
+        with open(self.libraryfolders_vdf, encoding="utf-8") as f:
             return [Path(v) for k,v in _vdf.parse(f)["LibraryFolders"].items() if k.isdigit()]
     
     @CachedProperty
@@ -518,12 +523,49 @@ class Steam:
                 if appid == id:
                     return AppInfo(self, appid, appinfo_data=appinfo)
 
-    def find_apps(self, pattern: str) -> Iterable[App]:
+    def find_apps_re(self, regexp: str, installed=True) -> Iterable[App]:
+        """ Find all apps by regular expression """
+        if not installed:
+            # Search whole appinfo cache
+            reg = re.compile(regexp, re.IGNORECASE)
+            broken_ids = set()
+            try:
+                for appid, appinfo in self.appinfo.items():
+                    # Skip broken entries
+                    try:
+                        name = appinfo["appinfo"]["common"]["name"]
+                    except KeyError:
+                        broken_ids.add(appid)
+                        continue
+                    if reg.search(name):
+                        for lf in self.library_folders: #pylint:disable=not-an-iterable
+                            app = lf.get_app(appid)
+                            if app:
+                                yield app
+                                break
+                        else:
+                            yield AppInfo(self, appid, appinfo_data=appinfo)
+            except:
+                import traceback
+                traceback.print_exc()
+                print("[SteamUtil] Warning: could not read non-installed apps from Steam appinfo cache. Searching locally")
+            else:
+                return
+            finally:
+                if broken_ids:
+                    print("[SteamUtil] Warning: found broken entries in appinfo cache:", ",".join(map(str, broken_ids)))
+        # Search local manifests directly
+        reg = re.compile(r'"name"\s+".*%s.*"' % regexp, re.IGNORECASE)
         for lf in self.library_folders: #pylint:disable=not-an-iterable
-            yield from lf.find_apps(pattern)
-    
-    def find_app(self, pattern: str) -> Optional[App]:
-        for app in self.find_apps(pattern):
-            return app
-    
+            for manifest in lf.appmanifests: #pylint:disable=not-an-iterable
+                with open(manifest, encoding="utf-8") as f:
+                    content = f.read()
+                if reg.search(content):
+                    yield App(lf, manifest, manifest_data=_vdf.parse_string(content))
 
+    def find_apps(self, pattern: str, installed=True) -> Iterable[App]:
+        return self.find_apps_re(fnmatch.translate(pattern).rstrip("\\Z"), installed=installed)
+
+    def find_app(self, pattern: str, installed=True) -> Optional[App]:
+        for app in self.find_apps(pattern, installed=installed):
+            return app

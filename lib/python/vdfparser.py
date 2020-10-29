@@ -15,6 +15,26 @@ from typing import Dict, Union, Mapping, Tuple
 DeepDict = Mapping[str, Union[str, "DeepDict"]]
 
 
+class LowerCaseNormalizingDict(dict):
+    def __init__(self, *args, **kwds):
+        super().__init__()
+        # XXX: is there a better way to do this?
+        for k,v in dict(*args,**kwds).items():
+            k_ = k.lower()
+            if k_ in self:
+                raise KeyError("Duplicate key in LowerCaseNormalizingDict arguments: %s" % k_)
+            self[k_] = v
+
+    def __setitem__(self, key, value):
+        return super().__setitem__(key.lower(), value)
+
+    def __getitem__(self, key):
+        return super().__getitem__(key.lower())
+
+    def get(self, key, default=None):
+        return super().get(key.lower(), default=default)
+
+
 class VdfParser:
     """
     Simple Steam/Source VDF parser
