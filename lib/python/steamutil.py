@@ -39,7 +39,7 @@ class DictPathRoProperty:
         self.path = path
         self.default = default
         self.type = type
-    
+
     def __get__(self, obj, cls):
         if obj is None:
             return self
@@ -71,7 +71,7 @@ class DictPathProperty(DictPathRoProperty):
 
     def __set__(self, obj, value):
         self._get_create_parent(obj)[self.path[-1]] = value
-    
+
     def __delete__(self, obj):
         del self._get_create_parent(obj)[self.path[-1]]
 
@@ -88,7 +88,7 @@ class MalformedManifestError(Exception):
 class AppInfo:
     steam: 'Steam'
     appid: int
-    
+
     def __init__(self, steam, appid, *, appinfo_data=None):
         self.steam = steam
         self.appid = appid
@@ -99,7 +99,7 @@ class AppInfo:
         return "<steamutil.AppInfo #%7d '%s' (%s)>" % (self.appid, self.name, self.install_dir)
 
     installed   = False
-    
+
     # AppInfo
     @CachedProperty
     def appinfo(self):
@@ -115,11 +115,11 @@ class AppInfo:
     install_dir = DictPathRoProperty("appinfo", ("appinfo", "config", "installdir"), default=None)
     languages   = DictPathRoProperty("appinfo", ("appinfo", "common", "supported_languages"))
     gameid      = DictPathRoProperty("appinfo", ("appinfo", "common", "gameid"), type=int)
-    
+
     # Misc.
     def get_userdata_path(self, user_id: Union[int, 'LoginUser']) -> Path:
         return self.steam.get_userdata_path(user_id) / str(self.appid)
-    
+
     @property
     def is_native(self):
         return sys.platform in self.oslist
@@ -166,11 +166,11 @@ class App(AppInfo):
 
         if "AppState" not in self.manifest:
             raise MalformedManifestError("App manifest doesn't have AppState key", self.manifest_path)
-    
+
         super().__init__(libfolder.steam, int(self.manifest["AppState"]["appid"]))
-    
+
     installed = True
-    
+
     def __repr__(self):
         return "<steamutil.App     #%7d '%s' @ \"%s\">" % (self.appid, self.name, self.install_path)
 
@@ -178,11 +178,11 @@ class App(AppInfo):
     name  = DictPathRoProperty("manifest", ("AppState", "name"))
     language = DictPathRoProperty("manifest", ("AppState", "UserConfig", "language"), None)
     install_dir = DictPathRoProperty("manifest", ("AppState", "installdir"))
-    
+
     @CachedProperty
     def install_path(self) -> Path:
         return self.steamapps_path / "common" / self.install_dir
-    
+
     # Workshop
     # TODO
     @CachedProperty
@@ -195,7 +195,7 @@ class App(AppInfo):
         uc = self.manifest["AppState"].get("UserConfig")
         if uc and "platform_override_source" in uc:
             return uc["platform_override_source"]
-    
+
     @property
     def is_proton_app(self):
         uc = self.manifest["AppState"].get("UserConfig")
@@ -205,14 +205,14 @@ class App(AppInfo):
     @CachedProperty
     def compat_path(self) -> Path:
         return self.steamapps_path / "compatdata" / str(self.appid)
-    
+
     @CachedProperty
     def compat_drive(self) -> Path:
         return self.compat_path / "pfx" / "drive_c"
-    
+
     # Install size
     declared_install_size = DictPathRoProperty("manifest", ("AppState", "SizeOnDisk"), 0, type=int)
-    
+
     def compute_install_size(self) -> int:
         def sum_size(p: Path):
             acc = 0
@@ -232,7 +232,7 @@ class LibraryFolder:
     def __init__(self, steam: 'Steam', path: Path):
         self.steam = steam
         self.path = path
-    
+
     def __repr__(self):
         return "<steamutil.LibraryFolder @ \"%s\">" % self.path
 
@@ -254,7 +254,7 @@ class LibraryFolder:
                     return found[0]
             # if none exists, return non-existant default name
         return steamapps
-    
+
     @property
     def common_path(self) -> Path:
         return self.steamapps_path / "common"
@@ -295,26 +295,26 @@ class UserAppConfig:
     def __init__(self, user, appid):
         self.user = user
         self.appid = appid
-    
+
     def __repr__(self):
         return "<steamutil.UserAppConfig appid=%d for account %s>" % (self.appid, self.user.account_name)
-    
+
     @property
     def _data(self):
         try:
             return self.user.localconfig["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]["Apps"][str(self.appid)]
         except KeyError:
             return {} # TODO
-    
+
     @property
     def last_played(self) -> datetime.datetime:
         return datetime.datetime.fromtimestamp(int(self._data.get("LastPlayed", "0")))
-    
+
     @property
     def playtime(self) -> datetime.time:
         t = int(self._data.get("Playtime", "0"))
         return datetime.time(t // 60, t % 60)
-    
+
     @property
     def playtime_two_weeks(self) -> datetime.time:
         t = int(self._data.get("Playtime2wks", "0"))
@@ -332,31 +332,31 @@ class LoginUser:
         self.steam = steam
         self.id = id
         self.info = info
-    
+
     def __repr__(self):
         return "<steamutil.LoginUser %d %s '%s'>" % (self.id , self.account_name, self.username)
-    
+
     @property
     def account_id(self):
         """ 32-bit account ID """
         return self.id & 0xffffffff
-    
+
     account_name = DictPathRoProperty("info", ("AccountName",))
     username = DictPathRoProperty("info", ("PersonaName",))
 
     @CachedProperty
     def userdata_path(self) -> Path:
         return self.steam.get_userdata_path(self)
-    
+
     @property
     def localconfig_vdf(self) -> Path:
         return self.userdata_path / "config" / "localconfig.vdf"
-    
+
     @CachedProperty
     def localconfig(self) -> DeepDict:
         with open(self.localconfig_vdf, encoding="utf-8") as f:
             return _vdf.parse(f)
-    
+
     # Game config
     def get_app_config(self, app: Union[int, App]) -> Optional[UserAppConfig]:
         if isinstance(app, App):
@@ -371,7 +371,7 @@ class Steam:
         self.root = install_path if install_path is not None else self.find_install_path()
         if self.root is None:
             raise Exception("Could not find Steam")
-    
+
     def __repr__(self):
         return "<steamutil.Steam @ \"%s\">" % self.root
 
@@ -416,15 +416,15 @@ class Steam:
     def libraryfolders_vdf(self) -> Path:
         """ The libraryfolders.vdf file listing all configured library locations """
         return self.root / "steamapps" / "libraryfolders.vdf"
-    
+
     @property
     def config_vdf(self) -> Path:
         return self.root / "config" / "config.vdf"
-    
+
     @property
     def loginusers_vdf(self) -> Path:
         return self.root / "config" / "loginusers.vdf"
-    
+
     # Users
     @CachedProperty
     def most_recent_user(self) -> Optional[LoginUser]:
@@ -439,18 +439,18 @@ class Steam:
         except KeyError:
             pass
         return None
-    
+
     def get_userdata_path(self, user_id: Union[int, LoginUser]) -> Path:
         if isinstance(user_id, LoginUser):
             user_id = user_id.account_id
         return self.root / "userdata" / str(user_id)
-    
+
     # Config
     @CachedProperty
     def config(self) -> DeepDict:
         with open(self.config_vdf, encoding="utf-8") as f:
             return _vdf.parse(f)
-    
+
     config_install_store = DictPathProperty("config", ("InstallConfigStore",))
     config_software_steam = DictPathProperty("config", ("InstallConfigStore", "Software", "Valve", "Steam"))
     compat_tool_mapping = DictPathProperty("config_software_steam", ("CompatToolMapping",))
@@ -459,11 +459,11 @@ class Steam:
     @CachedProperty
     def appinfo_vdf(self):
         return self.root / "appcache" / "appinfo.vdf"
-    
+
     @property
     def appinfo(self) -> AppInfoFile:
         return AppInfoFile.open(self.appinfo_vdf)
-    
+
     @CachedProperty
     def steamplay_manifest(self) -> DeepDict:
         with self.appinfo as info:
@@ -503,16 +503,16 @@ class Steam:
     def library_folder_paths(self) -> List[Path]:
         with open(self.libraryfolders_vdf, encoding="utf-8") as f:
             return [Path(v) for k,v in _vdf.parse(f)["LibraryFolders"].items() if k.isdigit()]
-    
+
     @CachedProperty
     def library_folders(self) -> List[LibraryFolder]:
         return [LibraryFolder(self, self.root)] + [LibraryFolder(self, p) for p in self.library_folder_paths] #pylint:disable=not-an-iterable
-    
+
     @property
     def apps(self) -> Iterable[App]:
         for lf in self.library_folders: #pylint:disable=not-an-iterable
             yield from lf.apps
-    
+
     def get_app(self, id: int, installed=True) -> Optional[App]:
         for lf in self.library_folders: #pylint:disable=not-an-iterable
             app = lf.get_app(id)

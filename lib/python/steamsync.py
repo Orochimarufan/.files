@@ -23,12 +23,12 @@ class SyncPath:
     Whereby target is the location being synched to and local is
       the prefix the data is synched from on the local machine.
     Common has components common to both paths.
-    
+
     Usually, you'd set the local prefix and then the common part.
         e.g.: op.home.prefix(".my_game") / "Savegames"
             whereby "Savegames" is included in the resulting target
             path, but ".my_game" is not.
-    
+
     Note that SyncPath should be considered immutable. Relevant
       methods return a new instance.
     """
@@ -52,16 +52,16 @@ class SyncPath:
         """ Return a new SyncPath that nas a component added """
         return SyncPath(self.op, self.local, self.common / component)
 
-    ## Retrieve paths    
+    ## Retrieve paths
     @property
     def path(self) -> Path:
         """ Get the local path """
         return self.local / self.common
-    
+
     def exists(self) -> bool:
         """ Chech whether local path exists """
         return self.path.exists()
-    
+
     @property
     def target_path(self) -> Path:
         """ Get the sync target path """
@@ -70,7 +70,7 @@ class SyncPath:
     ## Begin a SyncSet
     def __enter__(self) -> 'SyncSet':
         return SyncSet(self)
-    
+
     def __exit__(self, type, value, traceback):
         # Todo: auto-commit?
         pass
@@ -94,12 +94,12 @@ class SyncSet:
         self.spath = path
         self.local = {}
         self.target = {}
-    
+
     @property
     def path(self) -> Path:
         """ The local path """
         return self.spath.path
-    
+
     @property
     def target_path(self) -> Path:
         """ The target path """
@@ -123,11 +123,11 @@ class SyncSet:
         self.local.update(self._collect_files(self.path, patterns))
         self.target.update(self._collect_files(self.target_path, patterns))
         self._inval()
-    
+
     def __iadd__(self, pattern: str) -> 'SyncSet':
         self.add(pattern)
         return self
-    
+
     # Calculate changes
     def _inval(self):
         for cache in "files_from_local", "files_from_target", "files_unmodified":
@@ -143,19 +143,19 @@ class SyncSet:
                 for f, (_, sst) in src_files.items()
                 if f not in dst_files or sst.st_mtime > dst_files[f][1].st_mtime
         }
-    
+
     @CachedProperty
     def files_from_local(self) -> Set[Path]:
         return self._sync_set(self.local, self.target)
-    
+
     @CachedProperty
     def files_from_target(self) -> Set[Path]:
         return self._sync_set(self.target, self.local)
-    
+
     @CachedProperty
     def files_unmodified(self) -> Set[Path]:
         return (self.local.keys() | self.target.keys()) - (self.files_from_local | self.files_from_target)
-    
+
     def show_confirm(self, skip=True) -> bool:
         # XXX: move to SyncOp?
         print("  Local is newer: ", ", ".join(map(str, self.files_from_local)))
@@ -182,7 +182,7 @@ class SyncSet:
 
         if self.files_from_target:
             operations += [(self.target_path / p, self.path / p) for p in self.files_from_target] #pylint:disable=not-an-iterable
-        
+
         return self.op._do_copy(operations)
 
 
@@ -342,7 +342,7 @@ class SteamSync:
             return SteamSyncOp(self, app)
         else:
             return AppNotFound
-    
+
     def by_name(self, pattern):
         """ Steam App by Name """
         pt = re.compile(fnmatch.translate(pattern).rstrip("\\Z"), re.IGNORECASE)
@@ -355,7 +355,7 @@ class SteamSync:
         if app is None:
             return AppNotFound
         return SteamSyncOp(self, app)
-    
+
     def generic(self, name, *, platform=None):
         """ Non-Steam App """
         if platform is not None and platform not in sys.platform:

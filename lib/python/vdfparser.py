@@ -47,7 +47,7 @@ class VdfParser:
     whitespace_chars = " \t\n"
     comment_char = "/"
     newline_char = "\n"
-    
+
     def __init__(self, *, encoding=False, factory=dict, strict=True):
         """
         @brief Construct a VdfParser instance
@@ -89,7 +89,7 @@ class VdfParser:
 
         while True:
             c = fd.read(1)
-            
+
             if not c:
                 finish()
                 if len(tokens) / 2 != len(tokens) // 2:
@@ -97,7 +97,7 @@ class VdfParser:
                 elif self.strict and (escape or quoted or inner):
                     raise ValueError("Unexpected EOF: EOF encountered while not processing outermost mapping")
                 return self._make_map(tokens)
-            
+
             if escape:
                 current.append(c)
                 escape = False
@@ -110,11 +110,11 @@ class VdfParser:
                     finish(override=True)
                 else:
                     current.append(c)
-            
+
             elif comment:
                 if c == self.newline_char:
                     comment = False
-            
+
             else:
                 if c == self.escape_char:
                     escape = True
@@ -154,11 +154,11 @@ class VdfParser:
             return self.parse(io.BytesIO(content))
         else:
             return self.parse(io.StringIO(content))
-    
+
     def _make_literal(self, lit):
         # TODO
         return "\"%s\"" % (str(lit).replace("\\", "\\\\").replace("\"", "\\\""))
-    
+
     def _write_map(self, fd, dictionary, indent):
         if indent is None:
             def write(str=None, i=False, d=False, nl=False):
@@ -166,7 +166,7 @@ class VdfParser:
                     fd.write(str)
                 if d:
                     fd.write(" ")
-        
+
         else:
             def write(str=None, i=False, d=False, nl=False):
                 if not str and nl:
@@ -180,7 +180,7 @@ class VdfParser:
                         fd.write("\n")
                     elif d:
                         fd.write("\t\t")
-        
+
         for k, v in dictionary.items():
             if isinstance(v, dict):
                 write(self._make_literal(k), i=1, d=1, nl=1)
@@ -191,7 +191,7 @@ class VdfParser:
                 write(self._make_literal(k), i=1, d=1)
                 write(self._make_literal(v))
             write(d=1, nl=1)
-    
+
     def write(self, fd, dictionary: DeepDict, *, pretty=True):
         """
         Write a dictionary to a file in VDF format
@@ -223,7 +223,7 @@ class BinaryVdfParser:
 
     def __init__(self, factory=dict):
         self.factory = factory
-    
+
     @staticmethod
     def _read_until(fd: io.BufferedIOBase, delim: bytes) -> bytes:
         pieces = []
@@ -238,7 +238,7 @@ class BinaryVdfParser:
 
             end = buf.find(delim, 0, read)
             pieces.append(bytes(buf[:read if end < 0 else end]))
-        
+
         fd.seek(end - read + len(delim), io.SEEK_CUR)
 
         return b"".join(pieces)
@@ -249,10 +249,10 @@ class BinaryVdfParser:
 
     def _read_cstring(self, fd: io.BufferedIOBase) -> str:
         return self._read_until(fd, b'\0').decode("utf-8", "replace")
-    
+
     def _read_wstring(self, fd: io.BufferedIOBase) -> str:
         return self._read_until(fd, b'\0\0').decode("utf-16")
-    
+
     def _read_map(self, fd: io.BufferedIOBase) -> DeepDict:
         map = self.factory()
 
@@ -264,10 +264,10 @@ class BinaryVdfParser:
 
             if t in (self.T_END, self.T_END2):
                 return map
-            
+
             key, value = self._read_item(fd, t)
             map[key] = value
-    
+
     def _read_item(self, fd: io.BufferedIOBase, t: int) -> (str, DeepDict):
             key = self._read_cstring(fd)
 
@@ -287,7 +287,7 @@ class BinaryVdfParser:
                 return key, self._read_struct(fd, self.S_FLT4)[0]
             else:
                 raise ValueError("Unknown data type", fd.tell(), t)
-    
+
     def parse(self, fd: io.BufferedIOBase) -> DeepDict:
         return self._read_map(fd)
 
@@ -310,7 +310,7 @@ class AppInfoFile:
         self._close_file = close
         self._universe = None
         self._apps = None
-    
+
     def _load_map(self, offset: int) -> DeepDict:
         self.file.seek(offset, io.SEEK_SET)
         return self.parser.parse(self.file)
@@ -329,19 +329,19 @@ class AppInfoFile:
             self.appinfo = appinfo
             self.offset = offset
             self._data = None
-        
+
         def __getitem__(self, key):
             if self._data is None:
                 self._data = self.appinfo._load_map(self.offset)
             return self._data[key]
-        
+
         def __getattr__(self, attr):
             if attr in dir(dict):
                 if self._data is None:
                     self._data = self.appinfo._load_map(self.offset)
                 return getattr(self._data, attr)
             raise AttributeError(attr)
-        
+
         @property
         def dict(self):
             if self._data is None:
@@ -353,7 +353,7 @@ class AppInfoFile:
         if len(cs) < s:
             raise EOFError()
         return cs
-    
+
     def _read_int(self) -> int:
         return self.S_INT4.unpack(self._read_exactly(self.S_INT4.size))[0]
 
@@ -361,7 +361,7 @@ class AppInfoFile:
         magic = self._read_exactly(4)
         if magic != b"\x27\x44\x56\x07":
             raise ValueError("Wrong appinfo.vdf magic")
-        
+
         self._universe = self._read_int()
         self._apps = {}
 
@@ -372,7 +372,7 @@ class AppInfoFile:
 
             if read < 4:
                 raise EOFError()
-            
+
             struct = self.S_APP_HEADER.unpack(buffer)
             appid, size, *_ = struct
 
@@ -402,7 +402,7 @@ class AppInfoFile:
         if self._apps is None:
             self._load()
         return self._apps[key]
-    
+
     def __iter__(self):
         if self._apps is None:
             self._load()
@@ -417,7 +417,7 @@ class AppInfoFile:
     # Cleanup
     def __enter__(self):
         return self
-    
+
     def __exit__(self, exc, tp, tb):
         self.close()
 
