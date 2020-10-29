@@ -6,6 +6,8 @@ import fnmatch
 import re
 import itertools
 import shutil
+import tarfile
+import time
 
 from pathlib import Path
 from typing import Tuple, Dict, List, Union, Set, Callable, Any
@@ -88,6 +90,7 @@ class SyncSet:
     local: FileStatSet
     target: FileStatSet
     changeset: int
+    backup_dir: str = "_backup"
 
     def __init__(self, path):
         self.op = path.op
@@ -106,12 +109,14 @@ class SyncSet:
         return self.spath.target_path
 
     # Modify inclusion
-    @staticmethod
-    def _collect_files(anchor: Path, patterns: List[str]):
+    def _collect_files(self, anchor: Path, patterns: List[str]):
         files: SyncSet.FileStatSet = {}
         def add_file(f):
             if f.is_file():
-                files[f.relative_to(anchor)] = f, f.stat()
+                relative = f.relative_to(anchor)
+                if relative.parts[0] == self.backup_dir:
+                    return
+                files[relative] = f, f.stat()
             elif f.is_dir():
                 for f in f.iterdir():
                     add_file(f)
@@ -163,7 +168,7 @@ class SyncSet:
         print("  Unmodified: ", ", ".join(map(str, self.files_unmodified)))
 
         if skip and not self.files_from_local and not self.files_from_target:
-            print("Noting to do!")
+            print("    \033[31mNoting to do!\033[0m")
             return False
 
         print("Continue? <Y/n> ", end="")
@@ -171,6 +176,18 @@ class SyncSet:
         if resp.lower() in ("y", "yes", ""):
             return True
         return False
+    
+    def backup(self):
+        if not self.files_from_local:
+            print("    \033[35mBackup not needed\033[0m")
+        else:
+            backup_file = self.target_path / self.backup_dir / time.strftime("%Y%m%d_%H%M.tar.xz")
+            print("    \033[35mBacking up to \033[36m%s\033[35m...\033[0m" % backup_file)
+
+            backup_file.parent.mkdir(parents=True,exist_ok=True)
+            with tarfile.open(backup_file, "x:xz") as tf:
+                for name, (path, _) in self.target.items():
+                    tf.add(path, name)
 
     def execute(self, *, make_inconsistent=False) -> bool:
         operations = []

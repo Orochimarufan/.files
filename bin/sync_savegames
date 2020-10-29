@@ -43,6 +43,14 @@ def fell_seal(op):
         set.execute()
 
 
+@sync.by_name("Sacred Gold")
+def sacred(op):
+    with op.game_directory.prefix("save") as set:
+        set += "GAME*.PAK"
+        set += "hero*.pax"
+        set.execute()
+
+
 ### -----------------------------------------------------------------
 #  Other Games
 ### -----------------------------------------------------------------
@@ -54,5 +62,6 @@ def ffxiv(op):
     with path as set:
         set += "FFXIV_CHR*/*.dat"
         if set.show_confirm():
+            set.backup()
             set.execute()
 
