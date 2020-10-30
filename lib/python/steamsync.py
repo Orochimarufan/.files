@@ -5,6 +5,8 @@ import sys, os
 import fnmatch
 import re
 import itertools
+import functools
+import operator
 import shutil
 import tarfile
 import time
@@ -50,7 +52,7 @@ class SyncPath:
         """ Return a new SyncPath that has a component prefixed to the local path """
         return SyncPath(self.op, self.local / component, self.common)
 
-    def __div__(self, component: Union[str, Path]) -> 'SyncPath':
+    def __truediv__(self, component: Union[str, Path]) -> 'SyncPath':
         """ Return a new SyncPath that nas a component added """
         return SyncPath(self.op, self.local, self.common / component)
 
@@ -78,7 +80,25 @@ class SyncPath:
         pass
 
 
-class SyncSet:
+class _SyncSetCommon:
+    def show_confirm(self, skip=True) -> bool:
+        # XXX: move to SyncOp?
+        print("  Local is newer: ", ", ".join(map(str, self.files_from_local)))
+        print("  Target is newer: ", ", ".join(map(str, self.files_from_target)))
+        print("  Unmodified: ", ", ".join(map(str, self.files_unmodified)))
+
+        if skip and not self.files_from_local and not self.files_from_target:
+            print("    \033[31mNoting to do!\033[0m")
+            return False
+
+        print("Continue? <Y/n> ", end="")
+        resp = input().strip()
+        if resp.lower() in ("y", "yes", ""):
+            return True
+        return False
+
+
+class SyncSet(_SyncSetCommon):
     """
     A SyncSet represents a set of files to be synchronized
       from a local to a target location represented by a SyncPath
@@ -161,22 +181,6 @@ class SyncSet:
     def files_unmodified(self) -> Set[Path]:
         return (self.local.keys() | self.target.keys()) - (self.files_from_local | self.files_from_target)
 
-    def show_confirm(self, skip=True) -> bool:
-        # XXX: move to SyncOp?
-        print("  Local is newer: ", ", ".join(map(str, self.files_from_local)))
-        print("  Target is newer: ", ", ".join(map(str, self.files_from_target)))
-        print("  Unmodified: ", ", ".join(map(str, self.files_unmodified)))
-
-        if skip and not self.files_from_local and not self.files_from_target:
-            print("    \033[31mNoting to do!\033[0m")
-            return False
-
-        print("Continue? <Y/n> ", end="")
-        resp = input().strip()
-        if resp.lower() in ("y", "yes", ""):
-            return True
-        return False
-    
     def backup(self):
         if not self.files_from_local:
             print("    \033[35mBackup not needed\033[0m")
@@ -201,6 +205,30 @@ class SyncSet:
             operations += [(self.target_path / p, self.path / p) for p in self.files_from_target] #pylint:disable=not-an-iterable
 
         return self.op._do_copy(operations)
+
+
+class SyncMultiSet(list, _SyncSetCommon):
+    """ Provides a convenient interface to a number of SyncSets """
+    def _union_set(self, attrname) -> Set[Path]:
+        if not self:
+            return set()
+        return functools.reduce(operator.or_, map(operator.attrgetter(attrname), self))
+
+    @property
+    def files_from_local(self) -> Set[Path]:
+        return self._union_set("files_from_local")
+    
+    @property
+    def files_from_target(self) -> Set[Path]:
+        return self._union_set("files_from_target")
+    
+    @property
+    def files_unmodified(self) -> Set[Path]:
+        return self._union_set("files_unmodified")
+    
+    def execute(self, *, make_inconsistent=False) -> bool:
+        for sset in self:
+            sset.execute(make_inconsistent=make_inconsistent)
 
 
 ### -----------------------------------------------------------------
@@ -321,6 +349,57 @@ class SteamSyncOp(AbstractSyncOp):
         else:
             return super().my_documents
 
+    @property
+    def user_home(self) -> SyncPath:
+        return SyncPath(self, self.parent.home_path)
+
+    ## Steam Cloud
+    def steam_cloud_ufs(self) -> SyncMultiSet:
+        if "ufs" not in self.app.appinfo["appinfo"] or "savefiles" not in self.app.appinfo["appinfo"]["ufs"]:
+            raise ValueError("%r doesn't support Steam Cloud by way of UFS" % self.app)
+        sms = SyncMultiSet()
+
+        if sys.platform.startswith("win") or self.app.is_proton_app:
+            ufs_platform = "Windows"
+        elif sys.platform.startswith("linux"):
+            ufs_platform = "Linux"
+        else:
+            raise NotImplementedError("Steam Cloud UFS not (yet) supported on platform %s" % sys.platform)
+
+        for ufs_def in self.app.appinfo["appinfo"]["ufs"]["savefiles"].values():
+            # Filter by platform
+            if "platforms" in ufs_def and ufs_platform not in ufs_def["platforms"].values():
+                continue
+
+            # Find root anchor
+            root = ufs_def["root"]
+            if root == "WinMyDocuments":
+                path = self.my_documents
+            elif root in ("LinuxHome", "MacHome"):
+                path = self.user_home
+            else:
+                raise NotImplementedError("Steam Cloud UFS root %s not implemented for %r" % (root, self.app))
+
+            # Add relative path
+            # XXX: Should path be prefixed or included in the target. Are there even apps with multiple ufs entries?
+            # For now, take last component?
+            if "path" in ufs_def and ufs_def["path"]:
+                rpath = Path(ufs_def["path"])
+                if rpath.anchor:
+                    # Fix paths with leading slash/backslash XXX: is this valid?
+                    rpath = rpath.relative_to(rpath.anchor)
+                if len(rpath.parts) > 1:
+                    path = path.prefix(rpath.parent)
+                path /= rpath.name
+
+            # Add files by pattern
+            sset = SyncSet(path)
+            sset.add(ufs_def["pattern"])
+            # XXX: what about platform and recursive keys?
+            sms.append(sset)
+
+        return sms
+
 
 class SyncNoOp:
     """ No-Op Sync Operation """
@@ -344,7 +423,7 @@ class SteamSync:
     def __init__(self, target_path: Path, *, steam_path: Path = None):
         self.target_path = Path(target_path)
         self.steam = Steam(steam_path)
-        self.home_path = Path("~").expanduser()
+        self.home_path = Path.home()
 
     # Get Information
     @CachedProperty

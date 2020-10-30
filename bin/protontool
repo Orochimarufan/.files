@@ -50,7 +50,7 @@ class ProtonTool:
         else:
             apps = list(self.steam.find_apps(args.game, installed=not args.show_all))
             if len(apps) > 1:
-                print_error("Found more than one installed game matching /%s/, please be more specific" % args.game)
+                print_error("Found more than one game matching /%s/, please be more specific" % args.game)
                 for app in apps:
                     print("\t", app)
                 sys.exit(2)

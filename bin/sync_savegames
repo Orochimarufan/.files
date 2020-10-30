@@ -51,6 +51,13 @@ def sacred(op):
         set.execute()
 
 
+@sync.by_id(39540) # SpellForce Platinum
+def spellforce(op):
+    sync = op.steam_cloud_ufs()
+    if sync.show_confirm():
+        sync.execute()
+
+
 ### -----------------------------------------------------------------
 #  Other Games
 ### -----------------------------------------------------------------
