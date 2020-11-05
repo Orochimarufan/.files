@@ -2,8 +2,6 @@
 # (c) 2014-2018 Taeyeon Mori
 # vim: ft=sh:ts=2:sw=2:et
 
-AUR_DEFAULT_HOST="https://aur.archlinux.org/"
-
 # Load libraries and configuraion
 source "$DOTFILES/lib/libzsh-utils.zsh"
 source "$DOTFILES/etc/aur.conf"
@@ -56,10 +54,9 @@ PROG="$0"
 packages=()
 makepkg_args=()
 
-aur_get=aur_get_aur4
 DL_ONLY=false
 ASK=false
-AUR_HOST="$AUR_DEFAULT_HOST"
+AUR_HOST="https://aur.archlinux.org/"
 ADD_UPDATES=false
 ADD_SCMPKGS=false
 ADD_PYTHON=false
@@ -91,10 +88,8 @@ process_arg() {
   fi
   if [ -n "$_next_arg" ]; then
     case "$_next_arg" in
-      --aur-host)
-        AUR_HOST="$cx";;
       --exclude)
-        EXCLUDE=",$cx";;
+        EXCLUDE="$EXCLUDE,$cx";;
       --threads)
         if [ "${cx:0:1}" = "-" -o "${cx:0:1}" = "+" ]; then
           export MAKEPKG_MAKETHREADS=$[`nproc` + $cx]
@@ -109,9 +104,6 @@ process_arg() {
   fi
   case "$cx" in
     # aur.sh options
-    --old-aur)
-      warn "[AUR] Using old AUR methods (--old-aur)"
-      aur_get=aur_get_old;;
     -X|--download-only)
       warn "[AUR] Building was disabled (-X)"
       DL_ONLY=true;;
@@ -119,7 +111,7 @@ process_arg() {
       ASK=true;;
     --offline)
       LOCAL_ONLY=true;;
-    --aur-host|--exclude) # need more args
+    --exclude) # need more args
       _next_arg="$cx";;
     --no-custom)
       USECUSTOM=false;;
@@ -183,11 +175,6 @@ process_arg() {
       echo "  --noclean     Don't clean up temporary build directory when done."
       echo
       echo "  --clean       Clean up leaftover temporary files (of previous (failed) builds) and exit"
-      echo
-      echo "AUR backend options:"
-      echo "  --aur-host <url>"
-      echo "                Use a different AUR server. default: https://aur.archlinux.org/"
-      echo "  --old-aur     Use the old (non-git) AUR methods"
       echo
       echo "Makepkg/Pacman options:"
       echo "  -i            Install package after building it (requires superuser)"
@@ -287,13 +274,6 @@ else
   warn "Could not detect auracle on the system."
 fi
 
-if [ "$aur_get" != "aur_get_aur4" ] || [ "$AUR_HOST" != "$AUR_DEFAULT_HOST" ]; then
-  USE_AURACLE=false
-  $NEED_AURACLE &&
-    throw 31 "--old-aur and --aur-host are not supported with auracle features" ||
-    warn "--old-aur and --aur-host are no longer supported"
-fi
-
 if ! $USE_AURACLE; then
   warn "Auracle will not be used. Not all features are available without it."
   warn "Specifically, split packages cannot be detected without auracle."
@@ -302,16 +282,11 @@ fi
 
 # -------------------------------------------------------------------------
 # aur functions
-aur_get_old() {
-  [ -d "$1/.git" ] && throw 32 "Local copy of $1 is a Git clone from AUR v4. Don't use --old-aur with it!"
-  curl "$AUR_HOST/packages/${1:0:2}/$1/$1.tar.gz" | tar xz
-}
-
 [[ -z "$AUR_GIT_OPTIONS" ]] && AUR_GIT_OPTIONS=()
 [[ -z "$AUR_GIT_PULL_OPTIONS" ]] && AUR_GIT_PULL_OPTIONS=(--rebase)
 [[ -z "$AUR_GIT_CLONE_OPTIONS" ]] && AUR_GIT_CLONE_OPTIONS=()
 
-aur_get_aur4() {
+aur_get() {
   if [ -d "$1/.git" ]; then (
     cd "$1"
     git "${AUR_GIT_OPTIONS[@]}" pull "${AUR_GIT_PULL_OPTIONS[@]}"
@@ -463,7 +438,7 @@ fetch_package() {
       grep -q "#CUSTOMPKG" $p/PKGBUILD && \
       warn "[AUR] $p: Found #CUSTOMPKG; not updating PKGBUILD from AUR!" \
     } || \
-      $aur_get "$p" || \
+      aur_get "$p" || \
         warn "[AUR] $p: Couldn't download PKGBUILD from aur!"
 
     PKG_INFO[$p:From]="$AURDEST/$p"
