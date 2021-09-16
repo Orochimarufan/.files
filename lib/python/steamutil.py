@@ -140,7 +140,7 @@ class App(AppInfo):
     @CachedProperty
     def compat_path(self) -> Path:
         return self.steamapps_path / "compatdata" / str(self.appid)
-    
+
     @CachedProperty
     def compat_prefix(self) -> Path:
         return self.compat_path / "pfx"
@@ -463,7 +463,7 @@ class Steam:
     def apps(self) -> Iterable[App]:
         for lf in self.library_folders:
             yield from lf.apps
-    
+
     @overload
     def get_app(self, id: int, installed: Literal[True]=True) -> Optional[App]: ...
     @overload

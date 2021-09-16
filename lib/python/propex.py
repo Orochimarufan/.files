@@ -74,7 +74,7 @@ class DictPathRoProperty(CustomProperty[T]):
         self.path = path
         self.default = default
         self.type = type
-    
+
     def _get_parent(self, obj: O, *, create=False) -> MutableMapping[str, Any]:
         d: MutableMapping[str, Any] = getattr(obj, self.source_member)
         for pc in self.path[:-1]:

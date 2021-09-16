@@ -89,7 +89,7 @@ class SyncPath(Cloneable):
         self.op = op
         self.local = Path(local)
         self.common = PurePath(common)
-    
+
     @property
     def path(self) -> Path:
         return Path(self.local, self.common)
@@ -97,12 +97,12 @@ class SyncPath(Cloneable):
     def exists(self) -> bool:
         """ Chech whether local path exists """
         return self.path.exists()
-    
+
     ## Change paths
     def prefix(self: _SyncPath, component: PathOrStr) -> _SyncPath:
         """ Return a new SyncPath that has a component prefixed to the local path """
         return self.clone(local=self.local/component)
-    
+
     def __truediv__(self: _SyncPath, component: PathOrStr) -> _SyncPath:
         """ Return a new SyncPath that nas a component added """
         return self.clone(common=self.common/component)
@@ -141,7 +141,7 @@ class _SyncSetCommon(metaclass=ABCMeta):
         if resp.lower() in ("y", "yes", ""):
             return True
         return False
-    
+
     @abstractmethod
     def commit(self, *, make_inconsistent=False) -> bool: ...
 
@@ -270,15 +270,15 @@ class SyncMultiSet(list, _SyncSetCommon):
     @CachedProperty
     def files_from_local(self) -> Set[Path]:
         return self._union_set("files_from_local")
-    
+
     @CachedProperty
     def files_from_target(self) -> Set[Path]:
         return self._union_set("files_from_target")
-    
+
     @CachedProperty
     def files_unmodified(self) -> Set[Path]:
         return self._union_set("files_unmodified")
-    
+
     def commit(self, *, make_inconsistent=False) -> bool:
         res = True
         for sset in self:
@@ -313,7 +313,7 @@ class AbstractCommonPaths:
         @property
         def home(self) -> P:
             return self._path_factory(self.parent.home_path)
-        
+
         def from_(self, path: PathOrStr) -> P:
             return self._path_factory(path)
 
@@ -335,7 +335,7 @@ class AbstractCommonPaths:
         @property
         def drive_c(self) -> P:
             return self._path_factory("C:\\")
-        
+
         @CachedProperty
         def my_documents(self) -> P:
             """ Get the Windows "My Documents" folder """
@@ -402,11 +402,11 @@ class AbstractCommonPaths:
                 raise FileNotFoundError(f"Could not detect userprofile path in wine prefix {self.wine_prefix}")
             # XXX: be smarter?
             return candidates[0]
-        
+
         @property
         def home(self) -> P:
             return self._path_factory(self._wine_prefix_userprofile)
-        
+
         @CachedProperty
         def my_documents(self) -> P:
             """ Get the Windows "My Documents" folder """
@@ -428,7 +428,7 @@ class AbstractCommonPaths:
         @CachedProperty
         def xdg_config_dir(self) -> P:
             raise NotImplementedError()
-        
+
         @CachedProperty
         def xdg_data_dir(self) -> P:
             raise NotImplementedError()
@@ -438,7 +438,7 @@ class CommonPaths:
     class Mixin(AbstractCommonPaths.Common[Path]):
         def _path_factory(self, p: PathOrStr) -> Path:
             return Path(p)
-    
+
     class LinuxPaths(AbstractCommonPaths.Linux[Path], Mixin): pass
     class WindowsPaths(AbstractCommonPaths.Windows[Path], Mixin): pass
     class WinePaths(AbstractCommonPaths.Wine[Path], Mixin): pass
@@ -471,10 +471,10 @@ class CommonSyncPaths:
             # Not sure why this complains. Maybe because of the **kwds?
             super().__init__(parent=op.parent, **kwds) #type: ignore
             self.op = op
-        
+
         def _path_factory(self, p: PathOrStr) -> SyncPath:
             return SyncPath(self.op, p)
-    
+
     class LinuxPaths(AbstractCommonPaths.Linux[SyncPath], Mixin): pass
     class WindowsPaths(AbstractCommonPaths.Windows[SyncPath], Mixin): pass
     class WinePaths(AbstractCommonPaths.Wine[SyncPath], Mixin): pass
@@ -502,7 +502,7 @@ class AbstractSyncOp(ISyncOp):
 
     def __init__(self, parent: ISyncContext):
         self.parent = parent
-    
+
     # Paths
     @CachedProperty
     def paths(self) -> CommonSyncPaths.Paths:
@@ -554,7 +554,7 @@ class SteamSyncOp(AbstractSyncOp):
     def __init__(self, ssync, app):
         super().__init__(ssync)
         self.app = app
-    
+
     @CachedProperty
     def paths(self) -> CommonSyncPaths.Paths:
         return CommonSyncPaths.create(self, self.app.compat_prefix if self.app.is_proton_app else None)
@@ -688,7 +688,7 @@ class NoSteamSync(ISyncContext):
             if search_path.exists():
                 return GenericFoundSyncOp(self, name, search_path)
         return AppNotFound
-    
+
     def wine(self, name, prefixes: Sequence[PathOrStr], find: Callable[[CommonPaths.Paths], Path]) -> Union[WineSyncOp, GenericFoundSyncOp, SyncNoOp]:
         """
         Works the same as .generic() on Windows, but additionally searches any number of Wine-Prefixes when not running on Windows
