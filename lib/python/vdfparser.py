@@ -7,14 +7,51 @@ from __future__ import unicode_literals
 
 import io
 import struct
-import collections
 import datetime
 
-from typing import Dict, Union, Mapping, Tuple
+from typing import Any, Dict, Optional, Sequence, Type, TypeVar, Union, Mapping, Tuple, NewType, cast, overload
 
-DeepDict = Mapping[str, Union[str, "DeepDict"]]
+#### Nested dictionary support
+# Mypy doesn't support recursive types :(
+DeepDict = Mapping[str, Union[Mapping[str,  Any], str]]
+
+_NoDefault = NewType('_NoDefault', object)
+_nodefault = _NoDefault(object())
+_DefaultT = TypeVar('_DefaultT', DeepDict, str, None)
+_DDCastT = TypeVar('_DDCastT', DeepDict, str)
+
+@overload
+def dd_getpath(dct: DeepDict, path: Sequence[str], default: _NoDefault=_nodefault, *, t: None=None) -> Union[DeepDict, str]: ...
+@overload
+def dd_getpath(dct: DeepDict, path: Sequence[str], default: _DefaultT, *, t: None=None) -> Union[DeepDict, str, _DefaultT]: ...
+@overload
+def dd_getpath(dct: DeepDict, path: Sequence[str], default: _NoDefault=_nodefault, *, t: Type[_DDCastT]) -> _DDCastT: ...
+@overload
+def dd_getpath(dct: DeepDict, path: Sequence[str], default: _DefaultT, *, t: Type[_DDCastT]) -> Union[_DDCastT, _DefaultT]: ...
+
+def dd_getpath(dct: DeepDict, path: Sequence[str], default: Union[_DefaultT, _NoDefault]=_nodefault, *, t: Optional[Type[_DDCastT]]=None):
+    """
+    Retrieve a value from inside a nested dictionary.
+    @param dct The nested mapping
+    @param path The path to retrieve. Represented by a tuple of strings.
+    @param default A default value. Raises KeyError if omitted.
+    @param t Result type for built-in typing.cast(), specify 'str' or 'dict'
+    """
+    d: Any = dct
+    try:
+        for pc in path:
+            d = d[pc]
+        # XXX: runtime type check
+        assert (t is None or isinstance(d, t)), f"Expected value at path {path} to be {t}, not {type(d)}"
+        return d
+    except KeyError:
+        if default is not _nodefault:
+            return default
+        raise
 
 
+#### Case-Insensitive dictionary.
+# Unfortunately, Valve seems to play it a little loose with casing in their .vdf files
 class LowerCaseNormalizingDict(dict):
     def __init__(self, *args, **kwds):
         super().__init__()
@@ -268,7 +305,7 @@ class BinaryVdfParser:
             key, value = self._read_item(fd, t)
             map[key] = value
 
-    def _read_item(self, fd: io.BufferedIOBase, t: int) -> (str, DeepDict):
+    def _read_item(self, fd: io.BufferedIOBase, t: bytes) -> Tuple[str, Union[str, DeepDict]]:
             key = self._read_cstring(fd)
 
             if t == self.T_SKEY:
