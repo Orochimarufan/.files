@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-#pylint:disable=no-member
 
 from getpass import getuser
 from pathlib import Path
@@ -24,7 +23,7 @@ def zanzarah(op):
         if set.show_confirm():
             set.execute()
 
-#@sync.by_id(787860)
+@sync.by_id(787860) # Farming Simulator 19
 def fs19(op):
     with op.my_documents.prefix("My Games/FarmingSimulator2019") as set:
         set.add(
@@ -35,13 +34,12 @@ def fs19(op):
         )
         set.execute()
 
-#@sync.by_name("Fell Seal")
+@sync.by_name("Fell Seal")
 def fell_seal(op):
     with op.home.prefix("Fell Seal") as set:
         set += "saves"
         set += "customdata"
         set.execute()
-
 
 @sync.by_name("Sacred Gold")
 def sacred(op):
@@ -50,25 +48,47 @@ def sacred(op):
         set += "hero*.pax"
         set.execute()
 
-
 @sync.by_id(39540) # SpellForce Platinum
 def spellforce(op):
     sync = op.steam_cloud_ufs()
     if sync.show_confirm():
         sync.execute()
 
+@sync.by_id(1282590) # Train Sim World 2
+def tsw2(op):
+    with op.my_documents.prefix("My Games/TrainSimWorld2/Saved/SaveGames") as set:
+        set += "*.sav"
+        if set.show_confirm():
+            set.execute()
+
+
+@sync.by_id(1366540) # Dyson Sphere Program
+def dyson_sphere_program(op):
+    with op.my_documents.prefix("Dyson Sphere Program") as set:
+        set += "Save"
+        if set.show_confirm():
+            set.execute()
 
 ### -----------------------------------------------------------------
 #  Other Games
 ### -----------------------------------------------------------------
-@sync.generic("Final Fantasy XIV", platform="win")
+@sync.wine("Final Fantasy XIV",
+    ['/media/Games/Lutris/Final Fantasy XIV'],
+    lambda p: p.my_documents / "My Games/FINAL FANTASY XIV - A Realm Reborn")
 def ffxiv(op):
-    path = op.my_documents.prefix("My Games/FINAL FANTASY XIV - A Realm Reborn")
-    if not path.exists():
-        return
-    with path as set:
+    with op.found as set:
         set += "FFXIV_CHR*/*.dat"
         if set.show_confirm():
             set.backup()
-            set.execute()
+            set.commit()
 
+@sync.wine("Dragon Age Inquisition",
+    ['/media/Games/Lutris/Dragon Age Inquisition'],
+    lambda p: p.my_documents / "BioWare/Dragon Age Inquisition")
+def da_i(op):
+    with op.found / "Save" as set:
+        # XXX: Sync ProfileOptions{,_profile} too?
+        set += "*.DAS"
+        if set.show_confirm():
+            set.backup()
+            set.commit()
