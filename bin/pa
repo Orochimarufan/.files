@@ -1,0 +1,200 @@
+#!/bin/bash -eu
+
+# ---------------------------------------------------------
+# Lazy Variables
+__save() {
+    local name=$1
+    shift
+    declare -g $name="$*"
+}
+
+require() {
+    for name in $@; do
+        if [ -z "${!name+x}" ]; then
+            get_$name "__save $name" "require_for $name"
+        fi
+    done
+}
+
+shopt -s expand_aliases
+alias greq='$2 '
+alias gsave='$1 '
+
+typeset -gA require_depends=()
+
+invalidate() {
+    for name in $@; do
+        unset -v $name
+        if [ -n "${require_depends[$name]:-""}" ]; then
+            local tmp="${require_depends[$name]}"
+            unset -v require_depends[$name]
+            invalidate $tmp
+        fi
+    done
+}
+
+require_for() {
+    local self_name=$1
+    shift
+    require $@
+    for name in $@; do
+        require_depends[$name]="${require_depends[$name]-""} $self_name"
+    done
+}
+
+# ---------------------------------------------------------
+# Lazy variables
+get_ponymix_prog() {
+    gsave $(which ponymix 2>/dev/null)
+}
+
+get_pacmd_prog() {
+    # May be unavailable if only pulse clients installed
+    gsave $(which pacmd 2>/dev/null)
+}
+
+get_default_sink() {
+    gsave $(pactl info | grep 'Default Sink' | cut -d: -f2)
+}
+
+# There doesn't seem to be a better way to get a sink volume right now
+get_pacmd_dump() {
+    greq pacmd_prog
+    [ -n "$pacmd_prog" ] || { echo "ERROR: \$pacmd_dump requires available pacmd which is part of the pulseaudio server package"; exit 44; }
+    gsave "$(pacmd dump)"
+}
+
+get_pacmd_default_sink_config() {
+    greq pacmd_dump default_sink
+    gsave "$(echo "$pacmd_dump" | grep "$default_sink")"
+}
+
+get_pacmd_default_volume() {
+    greq pacmd_default_sink_config
+    gsave $[$(echo "$pacmd_default_sink_config" | grep "set-sink-volume" | cut -d' ' -f3)]
+}
+
+get_default_volume_percent() {
+    greq ponymix_prog
+    if [ -n "$ponymix_prog" ]; then
+        gsave $($ponymix_prog get-volume)
+    else
+        greq pacmd_default_volume
+        gsave $[(100*$pacmd_default_volume+32768)/65535]
+    fi
+}
+
+get_default_mute() {
+    greq ponymix_prog
+    if [ -n "$ponymix_prog" ]; then
+        $ponymix_prog is-muted && gsave yes || gsave no
+    else
+        greq pacmd_default_sink_config
+        gsave $(echo "$pacmd_default_sink_config" | grep "set-sink-mute" | cut -d' ' -f3)
+    fi
+}
+
+# ---------------------------------------------------------
+# Operations
+do_vol() {
+    # Set default sink volume
+    require default_sink
+    local offset
+    case "$1" in
+        m|mute)
+            pactl set-sink-mute $default_sink true
+            ;;
+        u|unmute)
+            pactl set-sink-mute $default_sink false
+            ;;
+        t|toggle|toggle-mute)
+            pactl set-sink-mute $default_sink toggle
+            ;;
+        \+) : ${offset:=+5%};&
+        \-) : ${offset:=-5%};&
+        *)  : ${offset:=$1}
+            pactl set-sink-mute $default_sink false
+            pactl set-sink-volume $default_sink $offset
+            ;;
+    esac
+    invalidate pacmd_dump default_volume_percent default_mute
+}
+
+do_notify() {
+    # Notification
+    if which dunstify >/dev/null 2>&1 && [ -n "`pgrep --ns $$ -u $(id -u) dunst`" ]; then
+        require default_sink default_volume_percent default_mute
+        dunst_id=6533319
+        if [ $default_mute = yes ]; then
+            icon=audio-volume-muted
+            text="Volume muted"
+        else
+            text="Volume $default_volume_percent%"
+            if [ $default_volume_percent -lt 35 ]; then
+                icon=audio-volume-low
+            elif [ $default_volume_percent -lt 75 ]; then
+                icon=audio-volume-medium
+            else
+                icon=audio-volume-high
+            fi
+        fi
+        if echo $default_sink | grep -q bluez; then
+            text="Bluetooth $text"
+        fi
+        bar_size=20
+        filled=$[(($bar_size * $default_volume_percent) + (100 / (2 * $bar_size)))/100]
+        bar=
+        if [ $filled -gt 0 ]; then
+            bar="`printf %.s● $(seq $filled)`"
+        fi
+        if [ $filled -lt $bar_size ]; then
+            bar="$bar`printf %.s○ $(seq $[$bar_size-$filled])`"
+        fi
+        dunstify -a "PA Volume" -u low -i $icon -r $dunst_id "$text" "$bar"
+    fi
+}
+
+do_print() {
+    require default_sink default_volume_percent default_mute
+    [ $default_mute = yes ] && muted=muted || muted=unmuted
+    echo "$default_sink $default_volume_percent% $muted"
+}
+
+# ---------------------------------------------------------
+# Main
+
+while [ $# -gt 0 ]; do
+    verb=$1; shift
+
+    case $verb in
+        v|vol|volume)
+            do_vol "$1"; shift
+            do_notify
+            do_print
+            ;;
+        set-volume)
+            do_vol "$1"; shift
+            ;;
+        n|notify)
+            do_notify
+            ;;
+        p|print)
+            do_print
+            ;;
+        get-default-sink)
+            require default_sink
+            echo $default_sink
+            ;;
+        *)
+            echo "Available verbs:"
+            echo "  set-volume <[+-]n%|mute|unmute|toggle>  Change default sink volume"
+            echo "  notify                                  Display a notification with current default sink volume"
+            echo "  print                                   Print the default sink and it's volume"
+            echo "  volume <see set-volume>                 Short for \"set-volume <...> notify print\""
+            echo "  get-default-sink                        Print default sink name"
+            echo
+            echo " verbs can be chained by separating them with space. Note that some have additional arguments"
+            exit 1
+            ;;
+    esac
+done

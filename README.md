@@ -32,12 +32,15 @@ Contains utility applications I'd hate to miss
 #### (Z) Shell scripts
 - argshell          : Run the same program multiple times with a common prefix of arguments
 - aur.sh            : Quite sophisticated AUR helper
+- cower             : Cower stub that calls auracle instead
 - ffpsp(-batch)     : Use HandBrakeCLI to encode videos to be compatible with Sony's PSP.
 - fix-steam-runtime.sh: Fix Steam runtime on Arch Linux (And others with "too new" libstdc++ and friends)
 - force-run-elf     : Try to execute a non-executable ELF file by passing it to the appropriate interpreter
+- pa                : Utility for managing PulseAudio volume without DE support.
 - paloop            : Loop a pulseaudio source to a sink.
 - remembersong      : Save the currently playing song name and artist to a text file.
 - schedshut         : Shutdown when a specific task/process finishes.
+- setcidir          : Set the +F attribute on an existing directory.
 - start             : Start a (graphical) app in the background; Like windows command of same name.
 - syncfat           : Copy files to a Windows volume while removing invalid characters from filenames.
 - unpack\_shift     : Unpack archives with different filename encoding
@@ -46,10 +49,13 @@ Contains utility applications I'd hate to miss
 - animelib          : Manually organize a collection of tv series
 - animelib3         : Try to automagically organize tv series as best as possible
 - fileinterp.py     : Play back a python script file as if it had been entered into a prompt.
+- iio-rotated       : Automatically rotate the screen according to iio-proxy data
 - mountpart         : Mount a partition in a whole-disk raw image file.
 - nosaver           : Try to inhibit the screensaver.
-- patchdir          : Patch a folder structure with files from an archive.
+- patchdir          : Patch a folder structure with files from an archive. (libarchive-c required)
+- protontool        : Interact with steam games and compatibility tool from the command line
 - sm-song-package   : Try to automatically create a .smzip of songs for StepMania.
+- sync\_savegames   : Custom savegame synchronization using steamsync.py
 - transportlinks    : Fixup symlinks after moving the target files.
 - videothumb        : Create (PSP compatible) thumbnails for video files.
 - visualsleep       : Sleep command with countdown timer.
@@ -83,7 +89,10 @@ Contains support libraries
 
 #### Python
 - advancedav.py     : A very overengineered way to construct complex ffmpeg commandlines
-- animelib.py       : Library version on animelib script
+- animelib.py       : Library version of animelib script
+- propex.py         : Assortment of property classes
+- steamsync.py      : Library for custom savegame synchronization with Steam support
+- steamutil.py      : Utilities for working with Steam's local database files
 - vdfparser.py      : A simple parser for Valve's VDF Key/Value format
 - xconv/            : Supporting library for xconv media conversion utility
     - profiles/     : (Virtual) package containing xconv profiles
@@ -119,6 +128,8 @@ XDG configuration directory
 - systemd/user      : Systemd user units
     - ssh-agent     : Service unit to keep a per-user ssh-agent instance
 - nvim              : NeoVim configuration
+- mpv               : MPV
+- youtube-dl        : Youtube-DL
 
 
 .files/texmf

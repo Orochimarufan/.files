@@ -4,8 +4,10 @@
 
 SongsFile="${1-$HOME/Documents/Songs.text}"
 
-Artist="$(playerctl metadata artist)"
-Title="$(playerctl metadata title)"
+IGNORE=plasma-browser-integration
+
+Artist="$(playerctl metadata artist -i $IGNORE)"
+Title="$(playerctl metadata title -i $IGNORE)"
 
 
 echo "$Artist -- $Title" >>$SongsFile

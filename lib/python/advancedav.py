@@ -1205,8 +1205,9 @@ class SimpleTask(Task):
     container = _redir("output", "container")
     metadata = _redir("output", "metadata")
     options = _redir("output", "options")
-    name = _redir("output", "name") # Deprecated! use filename instead. 'name' will be reused in the future
-    filename = _redir("output", "name")
+    name = _redir("output", "name")
+    path = _redir("output", "path")
+    filename = _redir("output", "filename")
 
     del _redir
 

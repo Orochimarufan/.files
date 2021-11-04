@@ -1,0 +1,47 @@
+#!/bin/bash -eu
+# Make a directory with content case-insensitive using chattr +F
+
+NEWFLAGS="+F"
+
+usage() {
+    echo "Usage: $1 [-c] <directory>"
+    echo
+    echo "    Make an existing directory case-folding (chattr +F)"
+    echo
+    echo "Options:"
+    echo "  -c    Clear the case-folding flag instead of setting it"
+    exit $2
+}
+
+while getopts hc opt; do
+    case "$opt" in
+        h) usage "$0" 0;;
+        c) NEWFLAGS="-F";;
+        ?) usage "$0" 255;;
+    esac
+done
+
+shift $((OPTIND - 1))
+
+if [ ! -d "$1" ]; then
+    echo -e "\e[31m'$1' is not a directory\e[0m"
+    exit 1
+fi
+
+# Make sure it doesn't end in /
+d="${1%/}"
+
+set -x
+# Create new directory with appropriate attributes
+mkdir "$d.$$"
+chattr $NEWFLAGS "$d.$$"
+# Need to re-create the whole subtree, so the flag propagates
+# Try to save space by making a recursive hardlink copy
+cp -Tldr "$d" "$d.$$"
+# Just to be on the safe side, fail if there are any files with a single reference left
+find "$d" -type f,l -links +1 -delete
+find "$d" -type d -empty -delete
+[ ! -d "$d" ]
+# Rename to old name
+mv "$d.$$" "$d"
+

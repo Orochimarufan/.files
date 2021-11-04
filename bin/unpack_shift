@@ -16,7 +16,7 @@ function usage {
     echo
     echo "Options:"
     echo "  --help      Show this help message and exit"
-    echo "  --test      Do a test-run"
+    echo "  --dry       Do a test-run"
     echo "  -*          Pass any other options to 7z"
     exit $2
 }
@@ -25,12 +25,15 @@ args=()
 sevenzip_args=()
 convmv_args=(-f shift-jis -t utf8)
 test_run=false
+conv_force=true
 
 for cx in "$@"; do
     case "$cx" in
         --help)
             usage "$0" 0;;
         --test)
+            conv_force=false;;
+        --dry)
             test_run=true;;
         -*)
             sevenzip_args+=("$cx");;
@@ -53,7 +56,7 @@ if [ -z "$args" ]; then
     usage "$0" 1
 fi
 
-$test_run || \
+$test_run || $conv_force && \
     convmv_args+=("--notest")
 
 #destination="`realpath "$destination"`"
@@ -69,7 +72,7 @@ cd "$tmp"
 msg "Unpacking Archive(s)..."
 for archive in "${args[@]}"; do
     msg "  Unpacking $archive"
-    LANG=ja_JP 7z x "${sevenzip_args[@]}" "$archive"
+    LANG=ja_JP 7z x "${sevenzip_args[@]}" "$archive" || true
 done
 
 msg "Fixing Filename encodings..."

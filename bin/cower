@@ -1,0 +1,48 @@
+#!/bin/zsh
+# stub out cower -s
+
+echo -e '\033[31mCower is broken. Use auracle instead\033[0m'
+
+usage() {
+    echo "$0 -s <term>"
+    echo "cower [-s] stub for muscle memory"
+    exit $1
+}
+
+MODE=
+ARGS=()
+
+next=
+for a in "$@"; do
+    if [ -z "$next" ]; then
+        case "$a" in
+            -s|--search)
+                MODE=search
+                next=args
+                ;;
+            -u|--updates)
+                MODE=outdated
+                next=args
+                ;;
+            -h|--help)
+                usage 0
+                ;;
+            *)
+                echo "Unknown option $a"
+                usage 1
+                ;;
+        esac
+    elif [ "$next" = args ]; then
+        ARGS+=("$a")
+    else
+        case "$next" in
+        esac
+        next=
+    fi
+done
+
+if [ -n "$MODE" ]; then
+    echo -e "$ \033[32mauracle $MODE $ARGS[*]\033[0m"
+    exec auracle $MODE "$ARGS[@]"
+fi
+

@@ -59,6 +59,7 @@ function relink() {
     [[ ! -e "$1" ]] && err "No such file or directory: '$1'" && return 1
     [[ -L "$2" ]] && rm -f "$2"
     [[ -e "$2" ]] && ! $OVERWRITE && err "File already exists and isn't a symbolic link: '$2'" && return 1
+    [[ ! -d "`dirname "$2"`" ]] && mkdir -p "`dirname "$2"`"
     color 31 ln -sr "$1" "$2"
 }
 
