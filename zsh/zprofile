@@ -103,6 +103,15 @@ fi
 
 
 #
+# Vitasdk
+#
+export VITASDK="/usr/local/vitasdk"
+if [ -d "$VITASDK/bin" ]; then
+    VITASDK_BIN="$VITASDK/bin"
+fi
+
+
+#
 # Paths
 #
 
@@ -115,8 +124,8 @@ fi
 path=(
   $HOME/.local/bin
   $DOTFILES/bin
-  $HOME/junest/bin
   $KDE_SRC_BUILD
+  $VITASDK_BIN
   /usr/local/{bin,sbin}
   /snap/bin
   $path

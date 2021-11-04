@@ -7,6 +7,9 @@
 [merge]
     tool = kdiff3
 
+[init]
+    defaultBranch = main
+
 [includeIf "gitdir:~/Development/KDE/"]
     path = "kde.local"
 
@@ -23,10 +26,22 @@
 	pushInsteadOf = https://github.com/
     pushInsteadOf = gh:
 
+# GitLab
+[url "https://gitlab.com/"]
+    insteadOf = git://gitlab.com/
+
+[url "git@gitlab.com:"]
+    pushInsteadOf = git://gitlab.com/
+    pushInsteadOf = https://gitlab.com/
+
 # KDE
 [url "https://anongit.kde.org/"]
     insteadOf = kde:
 
 [url "git@git.kde.org:"]
     pushInsteadOf = kde:
+
+# OSM
+[url "git@git.oro.sodimm.me:"]
+    pushInsteadOf = https://git.oro.sodimm.me/
 

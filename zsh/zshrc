@@ -45,15 +45,14 @@ alias gst="git status"
 function gupf {
     (
     set -e
-    local ORIGIN=${1-origin}
-    local UPSTREAM=${2-upstream}
     local LBRANCH=`git symbolic-ref --short HEAD`
+    local ORIGIN=${1-`git config --get branch.$LBRANCH.remote`}
+    local UPSTREAM=${2-upstream}
     local OBRANCH=${3-$LBRANCH}
     local UBRANCH=${4-$OBRANCH}
     git fetch $ORIGIN
     git fetch $UPSTREAM
-    git checkout $ORIGIN/$OBRANCH
-    git checkout -b merge
+    git checkout -b merge $ORIGIN/$OBRANCH
     git merge $UPSTREAM/$UBRANCH -m "merge upstream from `git ls-remote --get-url $UPSTREAM`"
     git checkout $LBRANCH
     git rebase merge
@@ -124,6 +123,17 @@ function clearbuf {
 # Misc.
 #
 alias lns="ln -sr"
+
+#
+# Please
+#
+function please {
+    if [ -z "$*" ]; then
+        sudo $(fc -ln -1)
+    else
+        sudo "$@"
+    fi
+}
 
 
 #

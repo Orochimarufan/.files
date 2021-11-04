@@ -32,6 +32,8 @@ Plug 'junegunn/fzf'
 
 Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
 
+Plug 'nfnty/vim-nftables'
+
 call plug#end()
 
 " User interface

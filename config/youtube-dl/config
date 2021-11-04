@@ -20,7 +20,7 @@
 # 247 VP9 720p
 # 244 VP9 480p
 #--format "(336/308/271/335/303/248/334/302/247/244)+(251/250/140/249)/best"
---format '(bestvideo[vcodec=vp9]/bestvideo)+(bestaudio[acodec=opus]/bestaudio)/best'
+--format '(bestvideo[vcodec^=avc1]/bestvideo)+(bestaudio[acodec=opus]/bestaudio)/best[vcodec^=avc1]/best'
 # Keep record of already downloaded files in a folder
 --download-archive ".youtube-dl"
 # Post-Processing

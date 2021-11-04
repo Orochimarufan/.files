@@ -4,6 +4,8 @@
 
 # Part 1 - Manual definitions
 
+<Multi_key> <parenleft> <plus> <parenright> : "⊕" U2295 # CIRCLED PLUS
+
 # Spacing versions of dead accents
 <dead_tilde> <space>             	: "~"   asciitilde # TILDE
 <dead_tilde> <dead_tilde>        	: "~"   asciitilde # TILDE

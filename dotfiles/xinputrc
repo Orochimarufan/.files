@@ -10,5 +10,5 @@ if xinput --list --name-only | grep -q "$trackpoint_dev"; then
 fi
 
 # Set up Compose Key
-setxkbmap -option lv3:ralt_switch_multikey
+setxkbmap -option compose:ralt
 
