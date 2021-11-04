@@ -1,0 +1,8 @@
+/*
+!/**/
+!/*.hpp
+!/*.cpp
+!/makefile
+!/.*
+!/*.code-workspace
+!/README.md
