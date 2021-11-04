@@ -33,6 +33,39 @@ def die(int, msg):
     sys.exit(int)
 
 
+class ProcessLaunchInfo:
+    """ Collects information needed to execute a process """
+    # Native oslist name
+    if sys.platform.startswith("linux"):
+        native_target = "linux"
+    elif sys.platform.startswith("win"):
+        native_target = "windows"
+
+    def __init__(self, argv, target="unknown"):
+        self.target = target
+        self.argv = argv
+        self.tool = None
+        self.environ = dict(os.environ)
+        self.workingdir = None
+
+    def prepend_argv(self, argv_part):
+        self.argv = [*argv_part, *self.argv]
+    
+    def exec(self):
+        if self.target != self.native_target:
+            print_warn("Oslist mismatch: %s -> %s. Is the correct compatibility tool selected?" % (self.target, self.native_target))
+        print_info("Launching", " ".join(self.argv))
+        for f in sys.stdout, sys.stderr:
+            f.flush()
+        if self.workingdir is not None:
+            os.chdir(self.workingdir)
+        os.execve(self.argv[0], self.argv, self.environ)
+
+
+class CompatToolNotFoundError(Exception):
+    pass
+
+
 class ProtonTool:
     steam: steamutil.Steam
     app: steamutil.App
@@ -96,30 +129,40 @@ class ProtonTool:
         info = commands.add_parser("info", description="Get information about a game")
         info.set_defaults(cmd=cls.cmd_info)
 
-        exec = commands.add_parser("exec", description="Run a command (e.g. winetricks) with the correct environment")
+        exec = commands.add_parser("exec", description="Run an arbitrary command through the compatibility tool")
         exec.set_defaults(cmd=cls.cmd_exec)
         exec.add_argument("cmdline", nargs="+", help="Command and arguments to run")
+        exec.add_argument("-t", "--tool", help="Override compatibility tool selection")
+
+        tool = commands.add_parser("tool", description="Run a command through the compatibility tool")
+        tool.set_defaults(cmd=cls.cmd_tool)
+        tool.add_argument("verb", help="The compatibility tool verb (e.g. run)")
+        tool.add_argument("cmdline", nargs="+", help="Command and arguments to run")
+        tool.add_argument("-t", "--tool", help="Override compatibility tool selection")
+        tool.add_argument("--config", help="Override compatibility tool config")
 
         run = commands.add_parser("run", description="Run game")
         run.set_defaults(cmd=cls.cmd_run)
-        run.add_argument("--waitforexit", action="store_true", help="use waitforexitandrun action")
-        run.add_argument("--tool", help="Override compatibility tool selection")
+        run.add_argument("--waitforexit", action="store_true", help="use waitforexitandrun verb")
+        run.add_argument("-t", "--tool", help="Override compatibility tool selection")
         run.add_argument("--config", help="Override compatibility tool config")
+        run.add_argument("--no-args", action="store_true", help="Run without any launch arguments")
+        run.add_argument("args", nargs="*", help="Override launch arguments")
 
         appinfo = commands.add_parser("appinfo", description="Dump the Steam product info")
         appinfo.set_defaults(cmd=cls.cmd_appinfo)
-        appinfo.add_argument("--json", action="store_true", help="Output JSON")
+        appinfo.add_argument("-j", "--json", action="store_true", help="Output JSON")
 
-        proton = commands.add_parser("proton", description="Run configured proton with custom arguments")
+        proton = commands.add_parser("proton", description="Run configured proton executable with custom arguments")
         proton.set_defaults(cmd=cls.cmd_proton, cmd_proton="proton")
         proton.add_argument("args", nargs="+", help="Proton arguments")
-        proton.add_argument("--tool", help="Override compatibility tool selection")
+        proton.add_argument("-t", "--tool", help="Override compatibility tool selection")
         proton.add_argument("--config", help="Override compatibility tool config")
 
         wine = commands.add_parser("wine", description="Run appropriate wine binary")
         wine.set_defaults(cmd=cls.cmd_proton, cmd_proton="wine")
         wine.add_argument("args", nargs="+", help="Wine arguments")
-        wine.add_argument("--tool", help="Override compatibility tool selection")
+        wine.add_argument("-t", "--tool", help="Override compatibility tool selection")
         wine.add_argument("--config", help="Override compatibility tool config")
 
         #enter = commands.add_parser("wine", description="Run the correct wine in the correct prefix")
@@ -138,10 +181,6 @@ class ProtonTool:
         self.steam.steamplay_manifest = self.appinfo[891390]["appinfo"]
         return self.steam.compat_tools
 
-    @property
-    def compat_tool(self) -> dict:
-        return self.app.compat_tool
-
     @classmethod
     def _format_tool_info(cls, steam, tool, toolinfo=None) -> (str, str):
         if toolinfo is None:
@@ -159,6 +198,9 @@ class ProtonTool:
 
         if toolinfo and "appid" in toolinfo:
             proton.append("#%s" % toolinfo["appid"])
+        if toolinfo:
+            proton.append("%s->%s" % (toolinfo.get("from_oslist", "?"), toolinfo.get("to_oslist", "?")))
+
         if "source" in tool:
             if tool["source"] == "user":
                 proton.append("[per-game override]")
@@ -171,9 +213,10 @@ class ProtonTool:
         if toolinfo and "install_path" in toolinfo:
             proton_path = toolinfo["install_path"]
             if not os.path.exists(toolinfo["install_path"]):
-                proton_path += " <<Not Accessible>>"
+                proton_path = f"{proton_path} <<Not Accessible>>"
         else:
             proton_path = "<<Not Installed>>"
+
         proton = " ".join(proton)
 
         return proton, proton_path
@@ -186,7 +229,7 @@ class ProtonTool:
 
             if self.app.is_proton_app:
                 # Find out version
-                tool = self.compat_tool
+                tool = self.app.compat_tool
                 proton, proton_path = self._format_tool_info(self.steam, tool)
             else:
                 proton = "No"
@@ -206,33 +249,117 @@ class ProtonTool:
             if self.app.is_proton_app:
                 print("\033[1;35mProtonDrv.\033[0m:", self.app.compat_drive)
 
-    def setup_proton_env(self, tool, wine=False):
+    #### ----------------------------------------------------------------------
+    ## Compatibility tool support
+    #### ----------------------------------------------------------------------
+    def tool_get_active(self):
+        """ Get the appropriate compatibility tool, either from commandline or app config """
+        if "tool" in self.args and self.args.tool:
+            tool = {"name": self.args.tool}
+        elif self.app.is_proton_app: # TODO: other tools?
+            tool = dict(self.app.compat_tool)
+        else:
+            return None
+
+        if "config" in self.args and self.args.config:
+            tool["config"] = self.args.config
+
+        return tool
+    
+    def tool_get_install_info(self, tool: dict):
+        if "name" not in tool:
+            raise ValueError("Malformed tool dict: missing 'name' member")
+        if tool["name"] not in self.compat_tools:
+            raise CompatToolNotFoundError(tool["name"])
+        return self.compat_tools[tool["name"]]
+    
+    def tool_apply_env(self, proc: ProcessLaunchInfo, tool: dict):
+        """ Set up tool environment only """
+        proc.environ["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = str(self.steam.root)
+        proc.environ["STEAM_COMPAT_DATA_PATH"] = str(self.app.compat_path)
+        proc.environ["STEAM_COMPAT_CONFIG"] = tool.get("config", "")
+        proc.environ["SteamAppId"] = str(self.app.appid)
+        proc.environ["SteamGameId"] = str(self.app.appid)
+
+    def tool_apply(self, proc: ProcessLaunchInfo, tool: dict, verb: str):
+        """ Set up compatibility tool """
+        # XXX: what about other tools? Like Steam Linux Runtime
+        toolinfo = self.tool_get_install_info(tool)
+
+        tool_description, _ = self._format_tool_info(self.steam, tool, toolinfo)
+        print_info("Using tool", tool_description)
+
+        # Check targets XXX: should this fail hard?
+        source_oslist = toolinfo.get("from_oslist", "windows")
+        if proc.target != source_oslist and proc.target != "unknown":
+            print_warn("Compatibility tool %s oslist mismatch: expected %s but got %s" % (tool["name"], source_oslist, proc.target))
+        target_oslist = toolinfo.get("to_oslist", proc.native_target)
+        if target_oslist != proc.native_target:
+            print_warn("Compatibility tool %s is targeting %s, but currently running on %s" % (tool["name"], target_oslist, proc.native_target))
+
+        # Find compat tool path and arguments
+        with open(toolinfo["install_path"] / "toolmanifest.vdf") as f:
+            mfst = steamutil._vdf.parse(f)
+            cmdline = None
+            # Newer v2 manifests
+            if "version" in mfst["manifest"]:
+                v = mfst["manifest"]["version"]
+                if v == "2":
+                    cmdline = mfst["manifest"]["commandline"].replace("%verb%", verb)
+            # Try to fall back to old manifest format
+            if cmdline is None:
+                v1_key = "commandline" if verb == "run" else "commandline_%s" % verb
+                if v1_key in mfst["manifest"]:
+                    cmdline = mfst["manifest"][v1_key]
+            if cmdline is None:
+                # Try to fall back to default
+                print_warn("Compat-tool '%s' toolmanifest.vdf does not specify commandline. Falling back to proton defaults" % tool["name"])
+                cmdline = "/proton %s" % verb
+
+        # Make path absolute
+        argv = cmdline.split()
+        argv[0] = str(toolinfo["install_path"]) + argv[0]
+
+        # update launch info
+        proc.tool = tool
+        proc.target = target_oslist
+        proc.prepend_argv(argv)
+        self.tool_apply_env(proc, tool)
+
+    def proton_apply_env(self, proc:ProcessLaunchInfo, tool, wine=False):
+        """ Apply some environment modifications that proton would do """
         info = self.compat_tools[tool["name"]]
         if not info:
             die(20, "Compatibility tool '%s' could not be found. Is it installed?" % tool["name"])
-        os.environ["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = str(self.steam.root)
-        os.environ["STEAM_COMPAT_DATA_PATH"] = str(self.app.compat_path)
-        os.environ["STEAM_COMPAT_CONFIG"] = tool.get("config", "")
-        os.environ["SteamAppId"] = str(self.app.appid)
-        os.environ["SteamGameId"] = str(self.app.appid)
-        os.environ["WINEPREFIX"] = str(self.app.compat_path / "pfx")
+        self.tool_apply_env(proc, tool)
+        proc.environ["WINEPREFIX"] = str(self.app.compat_path / "pfx")
         proton_dir = info["install_path"]
-        os.environ["WINEROOT"] = str(proton_dir / "dist")
+        proc.environ["WINEROOT"] = str(proton_dir / "dist")
         if wine:
             # FIXME: correctly detect WINEESYNC
-            os.environ["WINEESYNC"] = "1"
-            os.environ["LD_LIBRARY_PATH"] = ":".join(x for x in [
+            proc.environ["WINEESYNC"] = "1"
+            proc.environ["LD_LIBRARY_PATH"] = ":".join(x for x in [
                 str(proton_dir / "dist/lib64"),
                 str(proton_dir / "dist/lib"),
-                os.environ.get("LD_LIBRARY_PATH", None)] if x)
-            os.environ["PATH"] = ":".join((str(Path(info["install_path"]) / "dist" / "bin"), os.environ["PATH"]))
+                proc.environ.get("LD_LIBRARY_PATH", None)] if x)
+            proc.environ["PATH"] = ":".join((str(Path(info["install_path"]) / "dist" / "bin"), proc.environ["PATH"]))
 
+    #### ----------------------------------------------------------------------
+    ## Compatibility tool support
+    #### ----------------------------------------------------------------------
+    def cmd_tool(self):
+        """ Run the associated compatibility tool """
+        tool = self.tool_get_active()
+        proc = ProcessLaunchInfo(self.args.cmdline)
+        self.tool_apply(proc, tool, self.args.verb)
+        proc.exec()
+    
     def cmd_exec(self):
-        tool = self.compat_tool
-
-        self.setup_proton_env(tool, wine=True)
-
-        return os.execvp(self.args.cmdline[0], self.args.cmdline)
+        """ Execute a command in the tool environment (but not through the tool) """
+        tool = self.tool_get_active()
+        proc = ProcessLaunchInfo(self.args.cmdline)
+        self.proton_apply_env(proc, tool, wine=True)
+        proc.exec()
 
     def cmd_run(self):
         """ Run a game executable directly, possibly using a compat tool """
@@ -242,67 +369,42 @@ class ProtonTool:
             return 50
 
         # Check if we want to use a compat tool
-        if self.args.tool:
-            tool = {"name": self.args.tool}
-        elif self.app.is_proton_app:
-            tool = self.compat_tool
-        else:
-            tool = None
-
-        # Default to native oslist
-        if sys.platform.startswith("linux"):
-            target_oslist = "linux"
-        elif sys.platform.startswith("win"):
-            target_oslist = "windows"
+        tool = self.tool_get_active()
 
         # Set up compat tool
+        target_oslist = ProcessLaunchInfo.native_target
         if tool is not None:
-            # XXX: what about other tools? Like Steam Linux Runtime
-            if self.args.config:
-                tool["config"] = self.args.config
-
-            toolinfo = self.compat_tools[tool["name"]]
-
-            info_tool, _ = self._format_tool_info(self.steam, tool, toolinfo)
-
-            print_info("Using tool", info_tool)
-
-            if self.args.waitforexit:
-                verb = "commandline_waitforexitandrun"
-            else:
-                verb = "commandline"
-
-            with open(toolinfo["install_path"] / "toolmanifest.vdf") as f:
-                mfst = steamutil._vdf.parse(f)
-                cmdline = mfst["manifest"][verb]
-
-            path, *args = cmdline.split()
-            path = str(toolinfo["install_path"]) + path
-
-            self.setup_proton_env(tool)
-
-            # Set tool oslist and prepare arguments
-            target_oslist = toolinfo.get("from_oslist", "windows")
-            tool_argv = [path, *args]
-        else:
-            tool_argv = []
+            toolinfo = self.tool_get_install_info(tool)
+            target_oslist = toolinfo.get("from_oslist", "")
 
         # Read launch configurations
         for cfg in self.app.launch_configs:
             # Filter ones that won't work
             if "type" in cfg and cfg["type"] != "default": continue
-            if "oslist" in cfg and target_oslist not in cfg["oslist"]: continue
+            if "config" in cfg and "oslist" in cfg["config"] and target_oslist not in cfg["config"]["oslist"]: continue
             if "executable" not in cfg: continue
 
             # Execute
             game_path = self.app.install_path / cfg["executable"]
-            argv = [*tool_argv, str(game_path)] # TODO: Use Steam user custom args?
-            print_info("Launching", " ".join(argv))
-            os.chdir(game_path.parent)
-            return os.execv(argv[0], argv)
+            proc = ProcessLaunchInfo([str(game_path)], target_oslist)
+            proc.workingdir = str(game_path.parent)
+            break
         else:
-            print_error("No matching launch configuration in appinfo")
+            print_error("No launch config for %s in appinfo for %s" % (target_oslist, self.app.name))
             return 51
+
+        if not self.args.no_args:
+            if "args" in self.args and self.args.args:
+                proc.argv.extend(self.args.args)
+            else:
+                uc = self.user.get_app_config(self.app)
+                if uc and uc.launch_options:
+                    proc.argv.extend(uc.launch_options.split())
+
+        if tool is not None:
+            self.tool_apply(proc, tool, "waitforexitandrun" if self.args.waitforexit else "run")
+
+        proc.exec()
 
     def cmd_proton(self):
         # proton and wine subcommands:
@@ -311,18 +413,8 @@ class ProtonTool:
             print_error("App not installed or not a Proton app")
             return 51
 
-        if self.args.tool:
-            tool = {"name": self.args.tool, "source": "args"}
-        else:
-            tool = self.compat_tool
-
-        if self.args.config:
-            tool["config"] = self.args.config
-
-        try:
-            toolinfo = self.compat_tools[tool["name"]]
-        except KeyError:
-            print_error("Tool not found: '%s'" % tool["name"])
+        tool = self.tool_get_active()
+        toolinfo = self.tool_get_install_info(tool)
 
         info_tool, _ = self._format_tool_info(self.steam, tool, toolinfo)
 
@@ -341,12 +433,10 @@ class ProtonTool:
         if not os.path.exists(path):
             print_error("No such file:", path)
             return 53
-
-        self.setup_proton_env(tool, wine=self.args.cmd_proton=="wine")
-
-        print_info("Running", path, *argv[1:])
-
-        return os.execv(path, argv)
+        
+        proc = ProcessLaunchInfo([path, *argv[1:]])
+        self.proton_apply_env(proc, tool, wine=self.args.cmd_proton=="wine")
+        proc.exec()
 
     def cmd_appinfo(self):
         info = self.appinfo.get(self.app.appid, {})
