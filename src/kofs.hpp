@@ -9,6 +9,7 @@
 
 #include <dirent.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #include <string>
 #include <filesystem>
@@ -18,6 +19,7 @@ using namespace std::filesystem;
 
 /**
  * Helper struct for functions that require a c-string path
+ * @note Does not copy or own contents. original string/path object must be kept alive.
  */
 struct cpath {
     const char *path;
@@ -107,4 +109,31 @@ public:
         return iterator(*this, true);
     }
 };
+
+/**
+ * Like Python tempfile.mkdtemp().
+ * User-callable function to create and return a unique temporary
+ *  directory.  The return value is the pathname of the directory.
+ * @param prefix If given, the file name will begin with that prefix, otherwise a default prefix is used.
+ * @param dir If given, the file will be created in that directory, otherwise a default directory is used.
+ * The directory is readable, writable, and searchable only by the creating user.
+ * Caller is responsible for deleting the directory when done with it.
+ */
+fs::path create_temporary_directory(std::string prefix={}, fs::path dir={}) {
+    if (prefix.empty()) prefix = program_invocation_name;
+    if (dir.empty()) dir = fs::temp_directory_path();
+    auto ec = std::error_code{};
+    if (!dir.is_absolute()) dir = fs::absolute(dir, ec);
+    if (ec)
+        return {};
+    auto dirname = dir.string();
+    auto size = dirname.length()+1+prefix.length()+1+6+1;
+    char buf[size];
+    if (snprintf(buf, size, "%s/%s-XXXXXX", dirname.c_str(), prefix.c_str())<0)
+        return {};
+    if (::mkdtemp(buf) == nullptr)
+        return {};
+    return {buf};
+}
+
 } // namespace ko::fs

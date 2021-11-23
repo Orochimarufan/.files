@@ -18,7 +18,7 @@ namespace fs = std::filesystem;
 // TODO: XDG_RUNTIME_DIR etc
 
 constexpr auto ROOT_DIR = ".local/steam";
-constexpr auto DEFAULT_CMD = (const char*[]){"/bin/bash", nullptr};
+constexpr auto DEFAULT_CMD = std::array<char const *const, 2>{"/bin/bash", nullptr};
 constexpr auto STEAM_USER = "steamuser";
 
 // Helpers
@@ -98,7 +98,7 @@ namespace nsproc {
         fs::path root_path, home_path, pwd;
         char *const *exec_argv; // must be nullptr-terminated
         uid_t uid, gid;
-        bool mounts, gui_mounts, system_ro, keep_root, dummy_mode, pid_ns;
+        bool mounts, gui_mounts, system_ro, keep_root, dummy_mode, pid_ns, use_host_root;
         std::optional<fs::path> setup_exec;
         int ns_path_fd;
     };
@@ -192,22 +192,59 @@ namespace nsproc {
 
     int nsproc_create(const config &conf, proc_future<int> *report) {
         // Mount Namespace
+        fs::path root = conf.root_path;
         if (conf.mounts) {
             // Slightly hacky
             auto run_media_path = ko::util::str("/run/media/", getenv("USER"));
             auto [err, where] = ko::util::cvshort()
                 // Mount base system: /, /proc, /sys, /dev, /tmp, /run
-                .then(ko::ns::mount::mount_core, conf.root_path)
-                // Mount /usr readonly because file permissions are useless in a single-uid namespace
-                .ifthen(conf.system_ro && fs::exists(conf.root_path / "usr"),
-                      ko::ns::mount::protect_path, conf.root_path / "usr")
-                .ifthen(conf.system_ro && fs::exists(conf.root_path / "etc"),
-                      ko::ns::mount::protect_path, conf.root_path / "etc")
-                // Recursively bind in /media and /run/media/$USER for games
-                .ifthen("bind_media", fs::exists("/media") && fs::exists(conf.root_path / "media"),
-                      ko::os::bind, "/media", conf.root_path / "media", MS_REC)
-                .ifthen("bind_run_media", fs::exists(run_media_path), [&conf, &run_media_path] () {
-                      auto target_path =  conf.root_path / "run/media" / STEAM_USER;
+                .then([&conf, &root]() -> ko::util::cvresult {
+                    if (conf.use_host_root) {
+                        root = ko::fs::create_temporary_directory();
+                        auto rel_home = conf.home_path.relative_path();
+                        if (root.empty())
+                            return {1, "create temporary directory"};
+                        return ko::util::cvshort()
+                            .then("bind_host_root",
+                                ko::os::bind, "/", root, MS_REC|MS_SLAVE)
+                            // Make / read-only
+                            .ifthen("remount_ro", conf.system_ro,
+                                ko::os::bind, "/", root, MS_REMOUNT|MS_RDONLY)
+                            .ifthen("mount_tmp", fs::exists(root / "tmp"),
+                                ko::os::mount, "tmp", root / "tmp", "tmpfs", 0, nullptr)
+                            .ifthen("mount_run", fs::exists(root / "run"),
+                                ko::os::mount, "run", root / "run", "tmpfs", 0, nullptr)
+                            .then("bind_home",
+                                ko::os::bind, conf.root_path / rel_home, root / rel_home, MS_REC|MS_SLAVE);
+                    } else {
+                        return ko::util::cvshort()
+                            .then(ko::ns::mount::mount_core, root)
+                            // Mount /usr readonly because file permissions are useless in a single-uid namespace
+                            .ifthen(conf.system_ro && fs::exists(root / "usr"),
+                                ko::ns::mount::protect_path, root / "usr")
+                            .ifthen(conf.system_ro && fs::exists(root / "etc"),
+                                ko::ns::mount::protect_path, root / "etc")
+                            // Recursively bind in /media and /run/media/$USER for games
+                            .ifthen("bind_media", fs::exists("/media") && fs::exists(root / "media"),
+                                ko::os::bind, "/media", root / "media", MS_REC)
+                            // Add a dummy user to /etc/passwd
+                            .then("bind_passwd", [&conf, &root]() {
+                                auto etc_passwd = root / "etc/passwd";
+                                auto tmp_passwd = root / "tmp/passwd";
+
+                                if (fs::exists(etc_passwd)) {
+                                    fs::copy(etc_passwd, tmp_passwd);
+                                    auto s = std::fstream(tmp_passwd, std::fstream::out | std::fstream::app);
+                                    s << std::endl << STEAM_USER << ":x:" << conf.uid << ":" << conf.gid << ":Steam Container User:" << conf.home_path.native() << ":/bin/bash" << std::endl;
+                                    s.close();
+                                    return ko::os::bind(tmp_passwd, etc_passwd);
+                                }
+                                return 0;
+                            });
+                    }
+                })
+                .ifthen("bind_run_media", fs::exists(run_media_path), [&conf, &root, &run_media_path] () {
+                      auto target_path =  conf.use_host_root ? (root / run_media_path) : (root / "run/media" / STEAM_USER);
                       std::error_code ec;
                       fs::create_directories(target_path, ec);
                       if (ec)
@@ -216,23 +253,9 @@ namespace nsproc {
                 })
                 // Mount different things required by gui apps
                 .ifthen(conf.gui_mounts,
-                      ko::ns::mount::mount_gui, conf.root_path, conf.home_path.relative_path(), ko::util::str("run/user/", conf.uid))
-                // Add a dummy user to /etc/passwd
-                .then("bind_passwd", [&conf]() {
-                    auto etc_passwd = conf.root_path / "etc/passwd";
-                    auto tmp_passwd = conf.root_path / "tmp/passwd";
-
-                    if (fs::exists(etc_passwd)) {
-                        fs::copy(etc_passwd, tmp_passwd);
-                        auto s = std::fstream(tmp_passwd, std::fstream::out | std::fstream::app);
-                        s << std::endl << STEAM_USER << ":x:" << conf.uid << ":" << conf.gid << ":Steam Container User:" << conf.home_path.native() << ":/bin/bash" << std::endl;
-                        s.close();
-                        return ko::os::bind(tmp_passwd, etc_passwd);
-                    }
-                    return 0;
-                })
+                      ko::ns::mount::mount_gui, root, conf.home_path.relative_path(), ko::util::str("run/user/", conf.uid))
                 // Finally, pivot_root
-                .then(ko::ns::mount::pivot_root, conf.root_path, "mnt", conf.keep_root);
+                .then(ko::ns::mount::pivot_root, root, "mnt", conf.keep_root);
 
             if (err) {
                 if (report) report->post(1);
@@ -299,6 +322,7 @@ void usage(const char *prog) {
               << std::endl
               << "Namespace Creation Options:" << std::endl
               << "  -r        Run in fakeroot mode (implies -W)" << std::endl
+              << "  -H        Use host rootfs (only mount steamns home" << std::endl
               << "  -p <path> Use custom root path" << std::endl
               << "  -M        Don't set up mouts (implies -G)" << std::endl
               << "  -G        Don't set up GUI-related mounts" << std::endl
@@ -312,7 +336,7 @@ void usage(const char *prog) {
 
 struct config {
     fs::path root_path;
-    const char *const *exec_argv = DEFAULT_CMD;
+    const char *const *exec_argv = DEFAULT_CMD.data();
     bool fakeroot = false,
          mounts = true,
          gui_mounts = true,
@@ -321,7 +345,8 @@ struct config {
          dummy_mode = false,
          pid_ns = true,
          ns_create = false,
-         system_ro = true;
+         system_ro = true,
+         use_host_root = false;
     std::optional<fs::path> ns_path,
                             ns_setup_exec;
 };
@@ -329,9 +354,8 @@ struct config {
 // Parse commandline arguments
 // returns -1 on success, exit code otherwise
 int parse_cmdline(config &conf, int argc, const char *const *argv) {
-    constexpr auto spec = "+hp:rkwWMGe:c:j:D";
+    constexpr auto spec = "+hp:rHkwWMGe:c:j:D";
     
-    bool custom_root_path = false;
     std::optional<fs::path> create_path, join_path;
 
     while (true) {
@@ -348,10 +372,8 @@ int parse_cmdline(config &conf, int argc, const char *const *argv) {
             conf.fakeroot = true;
             conf.system_ro = false;
         }
-        else if (opt == 'p') {
+        else if (opt == 'p')
             conf.root_path = ::optarg;
-            custom_root_path = true;
-        }
         else if (opt == 'M')
             conf.mounts = false;
         else if (opt == 'G')
@@ -370,6 +392,8 @@ int parse_cmdline(config &conf, int argc, const char *const *argv) {
             join_path = ::optarg;
         else if (opt == 'D')
             conf.dummy_mode = true;
+        else if (opt == 'H')
+            conf.use_host_root = true;
     }
 
     // Check sanity
@@ -381,7 +405,7 @@ int parse_cmdline(config &conf, int argc, const char *const *argv) {
         }
 
         // NOTE: let -p slip by to facilitate '-p<path> -j-' use-case
-        if (!conf.dummy_mode && (!conf.mounts || !conf.gui_mounts || conf.keep_root)) {
+        if (!conf.dummy_mode && (!conf.mounts || !conf.gui_mounts || conf.keep_root || conf.use_host_root)) {
             std::cerr << "Error: -j cannot be combined with any namespace setup options (-MGk) unless -D is given" << std::endl;
             good = false;
         }
@@ -397,6 +421,10 @@ int parse_cmdline(config &conf, int argc, const char *const *argv) {
         // This is somewhat arbitrary but should prevent accidentally entering a fakeroot ns using -j
         if (conf.fakeroot) {
             std::cerr << "Error: -r cannot be combined with -c or -j" << std::endl;
+            good = false;
+        }
+        if (conf.use_host_root) {
+            std::cerr << "Error: -H cannot be combined with -c or -j" << std::endl;
             good = false;
         }
         
@@ -533,8 +561,9 @@ int main(int argc, char **argv) {
         .keep_root = conf.keep_root,
         .dummy_mode = conf.dummy_mode,
         .pid_ns = conf.pid_ns,
+        .use_host_root = conf.use_host_root,
         .setup_exec = conf.ns_setup_exec,
-        .ns_path_fd = ns_path_fd
+        .ns_path_fd = ns_path_fd,
     };
 
     constexpr auto stacksize = 1024*1024;
