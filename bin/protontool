@@ -7,6 +7,7 @@
 import steamutil
 import argparse
 import sys, os
+import shlex
 from pathlib import Path
 
 
@@ -59,6 +60,11 @@ class ProcessLaunchInfo:
             f.flush()
         if self.workingdir is not None:
             os.chdir(self.workingdir)
+        # Grab environment vars from cmdline
+        while "=" in self.argv[0]:
+            k, v = self.argv[0].split('=', 1)
+            self.environ[k]=v
+            self.argv.pop(0)
         os.execve(self.argv[0], self.argv, self.environ)
 
 
@@ -393,16 +399,22 @@ class ProtonTool:
             print_error("No launch config for %s in appinfo for %s" % (target_oslist, self.app.name))
             return 51
 
+        if tool is not None:
+            self.tool_apply(proc, tool, "waitforexitandrun" if self.args.waitforexit else "run")
+
         if not self.args.no_args:
             if "args" in self.args and self.args.args:
                 proc.argv.extend(self.args.args)
             else:
                 uc = self.user.get_app_config(self.app)
                 if uc and uc.launch_options:
-                    proc.argv.extend(uc.launch_options.split())
-
-        if tool is not None:
-            self.tool_apply(proc, tool, "waitforexitandrun" if self.args.waitforexit else "run")
+                    add_args = shlex.split(uc.launch_options)
+                    try:
+                        cmd_i = add_args.index(r"%command%")
+                    except ValueError:
+                        proc.argv.extend(add_args)
+                    else:
+                        proc.argv = [*add_args[:cmd_i], *proc.argv, *add_args[cmd_i+1:]] 
 
         proc.exec()
 
