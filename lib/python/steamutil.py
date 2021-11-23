@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Iterable, Dict, Literal, Mapping, Tuple, Callable, Optional, Union, Any, cast, overload
 
 from vdfparser import VdfParser, DeepDict, AppInfoFile, LowerCaseNormalizingDict, dd_getpath
-from propex import CachedProperty, DictPathProperty, DictPathRoProperty
+from propex import CachedProperty, SettableCachedProperty, DictPathProperty, DictPathRoProperty
 
 
 _vdf = VdfParser()
@@ -405,7 +405,7 @@ class Steam:
     def appinfo(self) -> AppInfoFile:
         return AppInfoFile.open(self.appinfo_vdf)
 
-    @CachedProperty
+    @SettableCachedProperty
     def steamplay_manifest(self) -> DeepDict:
         with self.appinfo as info:
             return info[891390]["appinfo"]

@@ -30,13 +30,13 @@ class CustomProperty(property, Generic[T]):
     def __get__(self, obj: Optional[O], cls: Type[O]):
         if obj is None:
             return self
-        raise AttributeError(f"Cannot read property {self.property_name} of {obj:r}")
+        raise AttributeError(f"Cannot read property {self.property_name} of {obj!r}")
 
     def __set__(self, obj: O, value: T):
-        raise AttributeError(f"Cannot write property {self.property_name} of {obj:r}")
+        raise AttributeError(f"Cannot write property {self.property_name} of {obj!r}")
 
     def __delete__(self, obj: O):
-        raise AttributeError(f"Cannot delete property {self.property_name} of {obj:r}")
+        raise AttributeError(f"Cannot delete property {self.property_name} of {obj!r}")
 
 
 class CachedProperty(CustomProperty[T]):
