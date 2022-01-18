@@ -140,9 +140,14 @@ namespace nsproc {
                 while (true) {
                     pid_t w = ::waitpid(-1, NULL, WNOHANG);
 
-                    if (w == -1) {
+                    if (w == 0) {
+                        break;
+                    } else if (w == -1) {
                         if (errno == ECHILD)
                             break;
+                        else
+                            // XXX: Should this abort?
+                            perror("waitpid");
                     }
                 }
             }

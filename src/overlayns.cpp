@@ -28,6 +28,7 @@ void usage(char const * prog) {
            "Spec options:\n"
            "    -m mnt-spec     Add a mount to the namespace\n"
            "    -o ovl-spec     Add an overlay to the namespace\n"
+           "    -N              Run in an empty network namespace\n"
            "\n"
            "Mount spec:\n"
            "    A mount specification takes the following format:\n"
@@ -360,9 +361,10 @@ auto parse_overlay_spec(std::string_view s, config &cfg) -> std::list<mount_spec
 
 int main(int argc, char*const* argv) {
     config cfg;
+    long clone_flags = CLONE_NEWNS;
 
     // Commandline parsing
-    constexpr auto argspec = "+ho:m:";
+    constexpr auto argspec = "+ho:m:N";
 
     for (auto opt = ::getopt(argc, argv, argspec); opt != -1; opt = ::getopt(argc, argv, argspec)) {
         if (opt == 'h' || opt == '?') {
@@ -388,6 +390,8 @@ int main(int argc, char*const* argv) {
             } else {
                 cfg.recipe.push_back({spec});
             }
+        } else if (opt == 'N') {
+            clone_flags |= CLONE_NEWNET;
         }
     }
     cfg.cmdline = &argv[::optind];
@@ -413,7 +417,7 @@ int main(int argc, char*const* argv) {
         }
 
         return ::execvp(cfg.cmdline[0], const_cast<char*const*>(cfg.cmdline));
-    }, 102400, CLONE_NEWNS);
+    }, 102400, clone_flags);
 
     if (ret)
         return ret;

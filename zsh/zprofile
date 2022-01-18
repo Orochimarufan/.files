@@ -112,6 +112,11 @@ fi
 
 
 #
+# GOPATH
+#
+export GOPATH=$HOME/.local/go
+
+#
 # Paths
 #
 

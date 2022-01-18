@@ -165,11 +165,7 @@ msg "Linking .config files... ($XDG_CONFIG_HOME)"
         [[ ${target:t} != ${dest:t} ]] && from=" (${target:t})"
         if [[ ! -d $target ]]; then
             color 32 echo "  Adding $name$from"
-            if [[ -L $target ]]; then
-                cp -P $target $dest
-            else
-                relink $target $dest
-            fi
+            relink $target $dest
         else
             if [[ ! -d $dest ]]; then
                 color 32 echo "  Creating directory $name/$from"

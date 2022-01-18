@@ -351,7 +351,7 @@ def main(argv):
                     echo "Set PATCHDIR_LOSE_FILES=1 to remove changed files without restoring originals"
                     exit 66
                 fi
-                if [ "$1" = "-k" -o -n "$PATCHDIR_KEEP_BACKUP" ];
+                if [ "${{1-}}" = "-k" -o -n "${{PATCHDIR_KEEP_BACKUP-}}" ]; then
                     cleanup() {{
                         echo "Keeping $1"
                     }}
