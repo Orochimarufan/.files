@@ -1,0 +1,134 @@
+# ======================= Keybinds =========================
+set $mod Mod4
+set $up w
+set $left a
+set $down s
+set $right d
+
+# Basics
+bindsym --no-repeat $mod+Return exec alacritty
+bindsym --no-repeat $mod+q kill
+bindsym --no-repeat $mod+Shift+c reload
+bindsym --no-repeat $mod+Shift+e exec swaynag -t warning -m 'Log out?' -B 'Log out.' 'swaymsg exit' -B 'Reboot' 'systemctl reboot' -B 'Shutdown' 'systemctl poweroff' -s 'Cancel'
+floating_modifier $mod normal
+
+# Moving around
+bindsym $mod+$up focus up
+bindsym $mod+$left focus left
+bindsym $mod+$down focus down
+bindsym $mod+$right focus right
+bindsym $mod+up focus up
+bindsym $mod+left focus left
+bindsym $mod+down focus down
+bindsym $mod+right focus right
+
+bindsym --no-repeat $mod+space focus mode_toggle
+
+# Layout
+bindsym $mod+b splith
+bindsym $mod+v splitv
+
+bindsym $mod+r layout stacking
+bindsym $mod+t layout tabbed
+bindsym $mod+e layout toggle split
+
+# Window
+bindsym $mod+f fullscreen
+bindsym $mod+c floating toggle
+
+bindsym $mod+z move scratchpad
+bindsym $mod+x scratchpad show
+
+# Moving/resizing windows
+bindsym $mod+1 mode "move"
+bindsym $mod+2 mode "resize"
+
+mode "move" {
+    bindsym $up move up
+    bindsym $left move left
+    bindsym $down move down
+    bindsym $right move right
+    bindsym up move up
+    bindsym left move left
+    bindsym down move down
+    bindsym right move right
+
+    bindsym Escape mode "default"
+    bindsym Return mode "default"
+    #bindsym Capslock mode "default"
+}
+mode "resize" {
+    bindsym $up resize shrink height 10px
+    bindsym $left resize shrink width 10px
+    bindsym $down resize grow height 10px
+    bindsym $right resize grow width 10px
+    bindsym up resize shrink height 10px
+    bindsym left resize shrink width 10px
+    bindsym down resize grow height 10px
+    bindsym right resize grow width 10px
+
+    bindsym Escape mode "default"
+    bindsym Return mode "default"
+    #bindsym Capslock mode "default"
+}
+
+# Media Keys
+bindsym --locked XF86AudioRaiseVolume exec pactl set-sink-volume @DEFAULT_SINK@ +5%
+bindsym --locked XF86AudioLowerVolume exec pactl set-sink-volume @DEFAULT_SINK@ -5%
+bindsym --locked --no-repeat XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
+bindsym --no-repeat XF86AudioMicMute exec pactl set-source-mute @DEFAULT_SOURCE@ toggle
+bindsym XF86MonBrightnessUp exec brightnessctl set 5%+
+bindsym XF86MonBrightnessDown exec brightnessctl set 5%-
+bindsym --locked --no-repeat XF86AudioPlay exec playerctl play-pause
+bindsym --locked XF86AudioNext exec playerctl next
+bindsym --locked XF86AudioPrev exec playerctl previous
+
+# Apps
+bindsym --no-repeat Mod1+Space exec krunner
+
+
+# ===================== Input/Output =======================
+input * {
+    xkb_layout "us"
+    xkb_options "compose:ralt"
+}
+
+input type:touchpad {
+    tap enable
+    natural_scroll disable
+    middle_emulation enable
+}
+
+xwayland disable
+
+# ===================== Status Bar =========================
+bar 1 {
+    mode dock
+    font pango:Noto Sans Mono, Font Awesome 5 Free, Font Awesome 5 Brands 16
+    status_command i3status-rs ~/.config/sway/status.toml
+    colors {
+        separator #666666
+        background #222222
+        statusline #dddddd
+    }
+}
+
+# ====================== Autostart =========================
+exec /usr/lib/geoclue-2.0/demos/agent
+exec gammastep
+
+exec krunner -d --replace
+exec klipper
+exec dunst
+
+exec swayidle -w \
+	timeout 300 'swaylock' \
+	timeout 330 'swaymsg "output * dpms off"' \
+	resume 'swaymsg "output * dpms on"' \
+	before-sleep 'swaylock'
+
+
+# ======================= Include ===========================
+include /etc/sway/config.d/*
+include local
+

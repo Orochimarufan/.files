@@ -1,0 +1,11 @@
+# Sway insists on following the config file symlink for relative paths in bg clause
+# so have to give full path here.
+output * bg ~/.config/sway/wallpaper fill
+
+bar 1 {
+    output eDP-1
+    font pango:Noto Sans Mono, Font Awesome 5 Free, Font Awesome 5 Brands 12
+}
+
+bindsym --no-repeat $mod+Shift+w exec ensure-lvup /opt/virt-session/viewer Windows
+
