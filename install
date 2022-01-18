@@ -1,6 +1,6 @@
 #!/bin/zsh
 # .files/install
-# (c) 2014-2017 MORI Taeyeon
+# (c) 2014-2021 MORI Taeyeon
 
 # Paths & Utils
 DOT="$(realpath "$(dirname "$0")")"
@@ -14,6 +14,12 @@ source "$DOT/lib/libzsh-utils.zsh"
 # =============================
 OVERWRITE=false
 ASK=true
+INSTALL_ZSH=true
+INSTALL_DOT=true
+INSTALL_CNF=true
+INSTALL_GIT=true
+INSTALL_CHSH=true
+INSTALL_EXTRA=true
 
 function print_usage() {
     echo "Usage: $1 [--help] [--overwrite] [--dont-ask]"
@@ -24,6 +30,8 @@ function print_usage() {
     echo "    -h, --help    Display this help message"
     echo "    --overwrite   Just overwrite existing dotfiles"
     echo "    --dont-ask    Don't ask questions. Use default values"
+    echo "    --no-{zsh,dotfiles,config,git,chsh,extra}"
+    echo "                  Don't set up the specific component"
 }
 
 for arg in "$@"; do
@@ -32,6 +40,12 @@ for arg in "$@"; do
             -h|--help) print_usage "$0"; exit 0;;
             --overwrite) OVERWRITE=true;;
             --dont-ask) ASK=false;;
+            --no-zsh) INSTALL_ZSH=false;;
+            --no-dotfiles) INSTALL_DOT=false;;
+            --no-config) INSTALL_CNF=false;;
+            --no-git) INSTALL_GIT=false;;
+            --no-chsh) INSTALL_CHSH=false;;
+            --no-extra) INSTALL_EXTRA=false;;
             *) print_usage "$0"; exit 1;;
         esac
     } || {
@@ -144,111 +158,135 @@ function add_names() {
 # Write files to $HOME
 # =============================
 # Setup dotfiles
-msg "Linking dotfiles..."
-(){
-    local -A names prios
-    pushd $DOT/dotfiles
-    add_names names prios *
-    for name src in ${(@kv)names}; do
-        color 32 echo "  Adding .$name"
-        relink $src $HOME/.$name
-    done
-    popd
-}
+if $INSTALL_DOT; then
+     msg "Linking dotfiles..."
+    (){
+        local -A names prios
+        pushd $DOT/dotfiles
+        add_names names prios *
+        for name src in ${(@kv)names}; do
+            color 32 echo "  Adding .$name"
+            relink $src $HOME/.$name
+        done
+        popd
+    }
+else
+    msg "Skipped dotfiles."
+fi
 
 # Setup .config
-: ${XDG_CONFIG_HOME:=~/.config}
-msg "Linking .config files... ($XDG_CONFIG_HOME)"
-(){
-    function relink_r() {
-        local target=$1 dest=$2 name=${3:-$2} from
-        [[ ${target:t} != ${dest:t} ]] && from=" (${target:t})"
-        if [[ ! -d $target ]]; then
-            color 32 echo "  Adding $name$from"
-            relink $target $dest
-        else
-            if [[ ! -d $dest ]]; then
-                color 32 echo "  Creating directory $name/$from"
-                mkdir $dest
-            elif [[ -n $from ]]; then
-                color 32 echo "  Adding directory $name/$from"
+if $INSTALL_CNF; then
+    : ${XDG_CONFIG_HOME:=~/.config}
+    msg "Linking .config files... ($XDG_CONFIG_HOME)"
+    (){
+        function relink_r() {
+            local target=$1 dest=$2 name=${3:-$2} from
+            [[ ${target:t} != ${dest:t} ]] && from=" (${target:t})"
+            if [[ ! -d $target ]]; then
+                color 32 echo "  Adding $name$from"
+                relink $target $dest
+            else
+                if [[ ! -d $dest ]]; then
+                    color 32 echo "  Creating directory $name/$from"
+                    mkdir $dest
+                elif [[ -n $from ]]; then
+                    color 32 echo "  Adding directory $name/$from"
+                fi
+                # This is still slightly ugly
+                local -A names prios
+                add_names names prios $target/*
+                for dst src in ${(@kv)names}; do
+                    relink_r $src $dest/${dst:t} $name/${dst:t}
+                done
             fi
-            # This is still slightly ugly
-            local -A names prios
-            add_names names prios $target/*
-            for dst src in ${(@kv)names}; do
-                relink_r $src $dest/${dst:t} $name/${dst:t}
-            done
-        fi
+        }
+        pushd $DOT/config
+        local -A names prios
+        add_names names prios *
+        for dst src in ${(@kv)names}; do
+            relink_r $src $XDG_CONFIG_HOME/$dst $dst
+        done
+        popd
     }
-    pushd $DOT/config
-    local -A names prios
-    add_names names prios *
-    for dst src in ${(@kv)names}; do
-        relink_r $src $XDG_CONFIG_HOME/$dst $dst
-    done
-    popd
-}
+else
+    msg "Skipped .config"
+fi
 
 # Setup git
 # =============================
-msg "Setting up Git configuration..."
+if $INSTALL_GIT; then
+    msg "Setting up Git configuration..."
 
-GIT="$DOT/git"
-[[ -e "$HOME/.gitconfig" ]] && ! grep -q ".files/install" "$HOME/.gitconfig" && err "Custom ~/.gitconfig already exists! Please remove it before running .files/install" && exit 1
+    GIT="$DOT/git"
+    [[ -e "$HOME/.gitconfig" ]] && ! grep -q ".files/install" "$HOME/.gitconfig" && err "Custom ~/.gitconfig already exists! Please remove it before running .files/install" && exit 1
 
-color 32 echo "  Writing .gitconfig"
-generate "$HOME/.gitconfig" <<EOF
+    color 32 echo "  Writing .gitconfig"
+    generate "$HOME/.gitconfig" <<EOF
 [include]
     path = $(relpath "$GIT" "$HOME")/config
     path = $(relpath "$GIT" "$HOME")/user-info
 EOF
 
-[ "`uname -s`" = "Darwin" ] && \
-cat >>"$HOME/.gitconfig" <<EOF
+    [ "`uname -s`" = "Darwin" ] && \
+    cat >>"$HOME/.gitconfig" <<EOF
     path = $(relpath "$GIT" "$HOME")/osx
 EOF
 
-color 32 echo "  Writing git/user-info"
-generate "$GIT/user-info" <<EOF
+    color 32 echo "  Writing git/user-info"
+    generate "$GIT/user-info" <<EOF
 [user]
     name = $REALNAME
     email = $EMAIL
 EOF
-
+else
+    msg "Skipped git configuration"
+fi
 
 # Setup ZSH/Prezto
 # =============================
-msg "Setting up ZSH configuration..."
-ZSH="$DOT/zsh"
+if $INSTALL_ZSH; then
+    msg "Setting up ZSH configuration..."
+    ZSH="$DOT/zsh"
 
-color 32 echo "  Writing .zshenv"
-generate "$HOME/.zshenv" <<EOF
+    color 32 echo "  Writing .zshenv"
+    generate "$HOME/.zshenv" <<EOF
 export DOTFILES="\$HOME/$(relpath "$DOT" "$HOME")"
 ZDOTDIR="\$DOTFILES/zsh"
 [[ -f "\$ZDOTDIR/zshenv" ]] && source "\$ZDOTDIR/zshenv"
 [[ ! -o LOGIN && "\$SHLVL" == 1 && -f "\$ZDOTDIR/zprofile" ]] && source "\$ZDOTDIR/zprofile"
 EOF
 
-for file in zshrc zpreztorc zlogin zlogout zprofile; do
-    color 32 echo "  Adding .$file"
-    relink "$ZSH/$file" "$ZSH/.$file"
-done
+    for file in zshrc zpreztorc zlogin zlogout zprofile; do
+        color 32 echo "  Adding .$file"
+        relink "$ZSH/$file" "$ZSH/.$file"
+    done
+else
+    msg "Skipped ZSH configuration."
+fi
 
 
 # Do misc setup
 # =============================
-test -f "$DOTFILES/install.extra" && "$DOTFILES/install.extra"
+if [ -x "$DOT/install.extra" ]; then
+    if $INSTALL_EXTRA; then
+        msg "Running install.extra..."
+        "$DOT/install.extra"
+    else
+        msg "Not running install.extra."
+    fi
+fi
 
 # Check login shell
-if  getent passwd $(id -un) | grep -q 'zsh$'; then
-    msg "Login shell is already set to zsh, you're good to go!"
-else
-    msg "Setting login shell to '$(which zsh)'..."
-    chsh -s "$(which zsh)"
+if $INSTALL_CHSH; then
+    if  getent passwd $(id -un) | grep -q 'zsh$'; then
+        msg "Login shell is already set to zsh, you're good to go!"
+    else
+        msg "Setting login shell to '$(which zsh)'..."
+        chsh -s "$(which zsh)"
+    fi
 fi
 
 # Done.
 warn "You may need to relog for all changes to take effect."
-warn "If you're currently running zsh, you definitely need to at least restart the shell to apply changes."
+$INSTALL_ZSH && warn "If you're currently running zsh, you definitely need to at least restart the shell to apply changes."
 

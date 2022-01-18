@@ -25,8 +25,8 @@
 # Keep record of already downloaded files in a folder
 --download-archive ".youtube-dl"
 # Post-Processing
---use-aavpp
---recode-video mkv
---embed-subs
+#--use-aavpp
+#--recode-video mkv
+#--embed-subs
 --add-metadata
 

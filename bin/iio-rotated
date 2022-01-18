@@ -18,8 +18,8 @@ XINPUT_TOUCH = "silead_ts"
 
 IIO_TO_KSCREEN = {
     "normal": "none",
-    "right-up": "left" if IS_WAYLAND else "right",
-    "left-up": "right" if IS_WAYLAND else "left",
+    "right-up": "right",
+    "left-up": "left",
     "bottom-up": "inverted"
 }
 
@@ -64,6 +64,44 @@ class DIKWinTabletModeManager(QtDBus.QDBusAbstractInterface):
             raise RuntimeError("Could not connect to PropertiesChanged")
 
 
+class DIKWinVirtualKeyboard(QtDBus.QDBusAbstractInterface):
+    enabledChanged = Signal(bool)
+    activeChanged = Signal(bool)
+
+    @Property(bool, notify=enabledChanged)
+    def enabled(self):
+        return self.property("enabled")
+
+    @enabled.write
+    def enabled(self, value):
+        self.setProperty("enabled", value)
+
+    @Property(bool, notify=activeChanged)
+    def active(self):
+        return self.property("active")
+
+    @active.write
+    def active(self, value):
+        self.setProperty("active", value)
+
+    @Slot(QtDBus.QDBusMessage)
+    def _on_properties_changed(self, msg):
+        intf, updated, invalid = msg.arguments()
+        updated = dict(updated)
+
+        if "enabled" in updated:
+            self.enabledChanged.emit(updated["enabled"])
+        if "active" in updated:
+            self.activeChanged.emit(updated["active"])
+
+    def __init__(self, service, path, connection, parent=None):
+        super().__init__(service, path, "org.kde.kwin.VirtualKeyboard", connection, parent)
+        if not connection.connect(service, path, "org.freedesktop.DBus.Properties",
+                           "PropertiesChanged", ["ork.kde.kwin.VirtualKeyboard"], "sa{sv}as",
+                           self._on_properties_changed):
+            raise RuntimeError("Could not connect to PropertiesChanged")
+
+
 class DISensorProxy(QtDBus.QDBusAbstractInterface):
     HasAccelerometerChanged = Signal(bool)
     @Property(bool, notify=HasAccelerometerChanged)
@@ -80,7 +118,6 @@ class DISensorProxy(QtDBus.QDBusAbstractInterface):
     
     def ReleaseAccelerometer(self):
         self.call("ReleaseAccelerometer")
-
 
     @Slot(QtDBus.QDBusMessage)
     def _on_properties_changed(self, msg):
@@ -147,7 +184,63 @@ class DARotated(QtDBus.QDBusAbstractAdaptor):
         self.app.qapp.quit()
 
 
+class DAOSKHelper(QtDBus.QDBusAbstractAdaptor):
+    Q_CLASSINFO("D-Bus Interface", "me.sodimm.oro.OSKHelper")
+
+    def __init__(self, oh):
+        super().__init__(oh)
+        self.oh = oh
+
+    @Property(bool)
+    def enabled(self):
+        return self.oh.enabled
+
+    @enabled.write
+    def enabled(self, value):
+        self.oh.enabled = value
+
+    @Slot()
+    def Show(self):
+        self.app.show_osk()
+
+
 # App Logic
+class OSKHelper(QtCore.QObject):
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+        self.kwin_vkb = app.kwin_vkb
+
+        self.icon = QtGui.QIcon.fromTheme("input-keyboard-virtual")
+        self.systray = QtWidgets.QSystemTrayIcon(self.icon, self)
+        self.systray.activated.connect(self.toggle_osk)
+
+        self.adaptor = DAOSKHelper(self)
+
+    @property
+    def enabled(self):
+        return self.systray.isVisible()
+
+    @enabled.setter
+    def enabled(self, value):
+        if value:
+            self.systray.show()
+        else:
+            self.systray.hide()
+
+    @Slot()
+    def show_osk(self):
+        if not self.kwin_vkb.enabled:
+            self.kwin_vkb.enabled = True
+        self.kwin_vkb.active = True
+
+    @Slot()
+    def toggle_osk(self):
+        if not self.kwin_vkb.enabled:
+            self.kwin_vkb.enabled = True
+        self.kwin_vkb.active = not self.kwin_vkb.active
+
+
 class Main(QtCore.QObject):
     def __init__(self, argv):
         super().__init__()
@@ -237,6 +330,16 @@ class Main(QtCore.QObject):
             self.tmm_enabled = False
             self.tmm = None
 
+        try:
+            self.kwin_vkb = DIKWinVirtualKeyboard(KWIN_BUSNAME, "/VirtualKeyboard", self.session_bus)
+        except:
+            self.kwin_vkb = None
+            self.osk_helper = None
+        else:
+            self.osk_helper = OSKHelper(self)
+            self.session_bus.registerObject("/OSKHelper", self.osk_helper)
+            self.osk_helper.enabled = False and IS_WAYLAND
+
         # Connect to System Bus
         self.system_bus = QtDBus.QDBusConnection.systemBus()
 
@@ -305,7 +408,7 @@ class Main(QtCore.QObject):
         iio.ClaimAccelerometer()
     
         iio.AccelerometerOrientationChanged.connect(self.on_device_turned)
-    
+
         try:
             self.qapp.exec()
         finally:
