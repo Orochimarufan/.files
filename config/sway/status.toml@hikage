@@ -4,6 +4,7 @@ icons = "awesome5"
 [[block]]
 block = "networkmanager"
 on_click = "alacritty -e nmtui"
+interface_name_exclude = ['br0', 'wg0', 'vnet*']
 
 [[block]]
 block = "memory"
@@ -33,7 +34,7 @@ alert = 10.0
 [[block]]
 block = "time"
 interval = 5
-format = "%a %d/%m %R"
+format = "%a %m/%d %R"
 
 #[[block]]
 #block = "hueshift"
@@ -47,7 +48,21 @@ block = "backlight"
 
 [[block]]
 block = "battery"
+device = "BAT0"
 interval = 30
+good = 70
+info = 45
+warning = 25
+critical = 15
+
+[[block]]
+block = "battery"
+device = "BAT1"
+interval = 30
+good = 70
+info = 45
+warning = 25
+critical = 15
 
 [[block]]
 block = "notify"

@@ -24,6 +24,12 @@ bindsym $mod+right focus right
 
 bindsym --no-repeat $mod+space focus mode_toggle
 
+# Swayr
+bindsym Mod1+Tab exec swayr prev-window current-workspace
+bindsym Mod1+Shift+Tab exec swayr next-window current-workspace
+bindsym Mod4+Tab exec swayr prev-window-of-same-layout current-workspace
+bindsym Mod4+Shift+Tab exec swayr next-window-of-same-layout current-workspace
+
 # Layout
 bindsym $mod+b splith
 bindsym $mod+v splitv
@@ -77,14 +83,14 @@ bindsym --locked XF86AudioRaiseVolume exec pactl set-sink-volume @DEFAULT_SINK@ 
 bindsym --locked XF86AudioLowerVolume exec pactl set-sink-volume @DEFAULT_SINK@ -5%
 bindsym --locked --no-repeat XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
 bindsym --no-repeat XF86AudioMicMute exec pactl set-source-mute @DEFAULT_SOURCE@ toggle
-bindsym XF86MonBrightnessUp exec brightnessctl set 5%+
-bindsym XF86MonBrightnessDown exec brightnessctl set 5%-
+bindsym --locked XF86MonBrightnessUp exec brightnessctl set 5%+
+bindsym --locked XF86MonBrightnessDown exec brightnessctl set 5%-
 bindsym --locked --no-repeat XF86AudioPlay exec playerctl play-pause
 bindsym --locked XF86AudioNext exec playerctl next
 bindsym --locked XF86AudioPrev exec playerctl previous
 
 # Apps
-bindsym --no-repeat Mod1+Space exec krunner
+bindsym --no-repeat Mod1+Space exec qdbus org.kde.krunner /App display
 
 
 # ===================== Input/Output =======================
@@ -99,12 +105,10 @@ input type:touchpad {
     middle_emulation enable
 }
 
-xwayland disable
-
 # ===================== Status Bar =========================
 bar 1 {
     mode dock
-    font pango:Noto Sans Mono, Font Awesome 5 Free, Font Awesome 5 Brands 16
+    font pango:Noto Sans Mono, Font Awesome 6 Free, Font Awesome 5 Free, 16
     status_command i3status-rs ~/.config/sway/status.toml
     colors {
         separator #666666
@@ -113,19 +117,38 @@ bar 1 {
     }
 }
 
+# ===================== Window Rules =======================
+# Dialogs
+for_window [app_id="org.kde.dolphin" title="(Extracting Files|File Already Exists|Moving|Compressing .* files) .*" tiling] floating enable
+for_window [app_id="org.kde.ark" title="(Extracting .* files|File Already Exists|Loading archive) .*" tiling] floating enable
+for_window [app_id="org.kde.*" title="Save file as..." tiling] floating enable
+for_window [app_id="pcmanfm" title="Execute File" tiling] floating enable
+for_window [app_id="org.keepassxc.KeePassXC" title="KeePassXC - Browser Access Request" tiling] floating enable
+
+# KRunner and Klipper
+for_window [app_id="org.kde.krunner"] floating enable
+for_window [app_id="org.kde.klipper"] floating enable
+
 # ====================== Autostart =========================
 exec /usr/lib/geoclue-2.0/demos/agent
 exec gammastep
 
+exec fcitx5 -d
 exec krunner -d --replace
 exec klipper
+exec /usr/lib/pam_kwallet_init
 exec dunst
+exec swayrd
 
+bindsym --no-repeat $mod+k exec 'swaymsg "output * dpms on"'
+bindsym --no-repeat $mod+Shift+k exec 'swaymsg "output * dpms off"'
+bindsym --no-repeat $mod+l exec 'swaylock -i ~/.config/sway/wallpaper'
 exec swayidle -w \
-	timeout 300 'swaylock' \
-	timeout 330 'swaymsg "output * dpms off"' \
-	resume 'swaymsg "output * dpms on"' \
-	before-sleep 'swaylock'
+    timeout 600 'swaylock -f -i ~/.config/sway/wallpaper' \
+    timeout 150 'swaymsg "output * dpms off"' \
+        resume 'swaymsg "output * dpms on"' \
+    before-sleep 'swaylock -f -i ~/.config/sway/wallpaper' \
+    after-resume 'swaymsg "output * dpms on"'
 
 
 # ======================= Include ===========================

@@ -1,3 +1,4 @@
+# kak: filetype=i3
 # Sway insists on following the config file symlink for relative paths in bg clause
 # so have to give full path here.
 output * bg ~/.config/sway/wallpaper fill
@@ -5,7 +6,21 @@ output * bg ~/.config/sway/wallpaper fill
 bar 1 {
     output eDP-1
     font pango:Noto Sans Mono, Font Awesome 5 Free, Font Awesome 5 Brands 12
+    # Breeze is broken as of 2022-01-18
+    icon_theme "Adwaita"
 }
 
 bindsym --no-repeat $mod+Shift+w exec ensure-lvup /opt/virt-session/viewer Windows
+bindsym --no-repeat $mod+Shift+1 output eDP-1 mode 1920x1080
+bindsym --no-repeat $mod+Shift+2 output eDP-1 mode --custom 1280x720
+
+bindsym --no-repeat --inhibited $mod+Shift+z seat - shortcuts_inhibitor toggle
+
+bindsym --no-repeat $mod+Shift+Return exec wezterm
+
+for_window [app_id="virt-viewer"] inhibit_idle open
+
+# Chromium < 98 broken with wlroots >= 0.15. This includes any Electron < 17 app
+# and presumably NW.js as well.
+xwayland enable
 
