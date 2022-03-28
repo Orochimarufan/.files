@@ -1,0 +1,21 @@
+# vim: ft=i3
+
+input 0:0:silead_ts {
+    map_to_output DSI-1
+}
+
+output DSI-1 {
+    transform 90
+}
+
+bar 1 {
+    output DSI-1
+}
+
+# No xwayland
+xwayland disable
+
+
+# ====================== Autostart =========================
+exec ~/.local/bin/ffy
+

@@ -5,11 +5,14 @@ set $left a
 set $down s
 set $right d
 
+set $terminal foot
+
 # Basics
-bindsym --no-repeat $mod+Return exec alacritty
+bindsym --no-repeat $mod+Return exec $$terminal
 bindsym --no-repeat $mod+q kill
 bindsym --no-repeat $mod+Shift+c reload
 bindsym --no-repeat $mod+Shift+e exec swaynag -t warning -m 'Log out?' -B 'Log out.' 'swaymsg exit' -B 'Reboot' 'systemctl reboot' -B 'Shutdown' 'systemctl poweroff' -s 'Cancel'
+bindsym --no-repeat --inhibited $mod+Shift+z seat - shortcuts_inhibitor toggle
 floating_modifier $mod normal
 
 # Moving around
@@ -94,16 +97,39 @@ bindsym --no-repeat Mod1+Space exec qdbus org.kde.krunner /App display
 
 
 # ===================== Input/Output =======================
+# Keyboard
 input * {
     xkb_layout "us"
     xkb_options "compose:ralt"
 }
 
+# Touchpad
 input type:touchpad {
     tap enable
     natural_scroll disable
     middle_emulation enable
 }
+
+# Wallpaper
+# Sway insists on following the config file symlink for relative paths in bg clause
+# so have to give full path here.
+set $wallpaper ~/.config/sway/wallpaper
+
+output * bg $wallpaper fill
+
+# Lock screen and power saving
+set $swaylock_cmd "swaylock -f -i $wallpaper"
+
+bindsym --no-repeat $mod+k exec 'swaymsg "output * dpms on"'
+bindsym --no-repeat $mod+Shift+k exec 'swaymsg "output * dpms off"'
+bindsym --no-repeat $mod+l exec $swaylock_cmd
+exec swayidle -w \
+    timeout 600 $swaylock_cmd \
+    timeout 150 'swaymsg "output * dpms off"' \
+        resume 'swaymsg "output * dpms on"' \
+    before-sleep $swaylock_cmd \
+    after-resume 'swaymsg "output * dpms on"'
+
 
 # ===================== Status Bar =========================
 bar 1 {
@@ -117,6 +143,7 @@ bar 1 {
     }
 }
 
+
 # ===================== Window Rules =======================
 # Dialogs
 for_window [app_id="org.kde.dolphin" title="(Extracting Files|File Already Exists|Moving|Compressing .* files) .*" tiling] floating enable
@@ -129,6 +156,7 @@ for_window [app_id="org.keepassxc.KeePassXC" title="KeePassXC - Browser Access R
 for_window [app_id="org.kde.krunner"] floating enable
 for_window [app_id="org.kde.klipper"] floating enable
 
+
 # ====================== Autostart =========================
 exec /usr/lib/geoclue-2.0/demos/agent
 exec gammastep
@@ -139,16 +167,6 @@ exec klipper
 exec /usr/lib/pam_kwallet_init
 exec dunst
 exec swayrd
-
-bindsym --no-repeat $mod+k exec 'swaymsg "output * dpms on"'
-bindsym --no-repeat $mod+Shift+k exec 'swaymsg "output * dpms off"'
-bindsym --no-repeat $mod+l exec 'swaylock -i ~/.config/sway/wallpaper'
-exec swayidle -w \
-    timeout 600 'swaylock -f -i ~/.config/sway/wallpaper' \
-    timeout 150 'swaymsg "output * dpms off"' \
-        resume 'swaymsg "output * dpms on"' \
-    before-sleep 'swaylock -f -i ~/.config/sway/wallpaper' \
-    after-resume 'swaymsg "output * dpms on"'
 
 
 # ======================= Include ===========================
