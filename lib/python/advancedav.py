@@ -6,7 +6,7 @@ AdvancedAV FFmpeg commandline generator v3.0 [Library Edition]
     It can automatically parse input files with the help of FFmpeg's ffprobe tool (WiP)
     and allows programatically mapping streams to output files and setting metadata on them.
 -----------------------------------------------------------
-    Copyright 2014-2019 Taeyeon Mori
+    Copyright 2014-2022 Taeyeon Mori
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,30 +22,46 @@ AdvancedAV FFmpeg commandline generator v3.0 [Library Edition]
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import os
-import sys
+from __future__ import annotations
+
+import itertools
 import json
 import logging
+import os
 import subprocess
-import collections
-import itertools
-
+import sys
 from abc import ABCMeta, abstractmethod
-from typing import Iterable, Mapping, Sequence, Iterator, MutableMapping
+from collections import defaultdict, deque
 from pathlib import Path, PurePath
+from typing import (Any, Callable, ClassVar, Dict, Generic, Iterable, Iterator,
+                    List, Literal, Mapping, MutableMapping, MutableSequence,
+                    MutableSet, Optional, Protocol, Sequence, Tuple, TypeVar,
+                    Union)
+
+try:
+    from typing import Self  # type:ignore
+except ImportError:
+    try:
+        from typing_extensions import Self
+    except ImportError:
+        from typing import _SpecialForm
+        @_SpecialForm #type:ignore
+        def Self(self, params):
+            raise TypeError(f"{self} is not subscriptable")
 
 
 __all__ = "AdvancedAVError", "AdvancedAV", "SimpleAV", "MultiAV"
 
-version_info = 2, 99, 8
+version_info = 2, 99, 9
 
 # Constants
-S_AUDIO = "a"
-S_VIDEO = "v"
-S_SUBTITLE = "s"
-S_ATTACHMENT = "t"
-S_DATA = "d"
-S_UNKNOWN = "u"
+StreamType = Union[Literal["a"], Literal["v"], Literal["s"], Literal["t"], Literal["d"], Literal["u"]]
+S_AUDIO: StreamType = "a"
+S_VIDEO: StreamType = "v"
+S_SUBTITLE: StreamType = "s"
+S_ATTACHMENT: StreamType = "t"
+S_DATA: StreamType = "d"
+S_UNKNOWN: StreamType = "u"
 
 
 # == Exceptions ==
@@ -54,6 +70,14 @@ class AdvancedAVError(Exception):
 
 
 # == Helpers ==
+T = TypeVar("T")
+U = TypeVar("U")
+V = TypeVar("V")
+
+OptionsValue = Union[str, int, Literal[True], List[str], List[int], List[Literal[True]]]
+OptionsDict = Dict[str, OptionsValue]
+InformationDict = Dict[str, Any]
+
 class FFmpeg:
     @staticmethod
     def int(no: str) -> int:
@@ -78,12 +102,8 @@ class FFmpeg:
 
     # Commandline generation
     @staticmethod
-    def argv_options(options: Mapping, qualifier: str=None) -> Iterator:
-        """ Yield arbitrary options
-
-        :type options: Mapping[str, str]
-        :rtype: Iterator[str]
-        """
+    def argv_options(options: OptionsDict, qualifier: Optional[str]=None) -> Iterator[str]:
+        """ Yield arbitrary options """
         if qualifier is None:
             opt_fmt = "-%s"
         else:
@@ -99,12 +119,8 @@ class FFmpeg:
                 yield str(value)
 
     @staticmethod
-    def argv_metadata(metadata: Mapping, qualifier: str=None) -> Iterator:
-        """ Yield arbitrary metadata
-
-        :type metadata: Mapping[str, str]
-        :rtype: Iterator[str]
-        """
+    def argv_metadata(metadata: Mapping[str, str], qualifier: Optional[str]=None) -> Iterator[str]:
+        """ Yield arbitrary metadata options """
         if qualifier is None:
             opt = "-metadata"
         else:
@@ -119,15 +135,21 @@ class FFmpeg:
         "video": S_VIDEO,
         "subtitle": S_SUBTITLE,
         "attachment": S_ATTACHMENT,
-        "data": S_DATA
+        "data": S_DATA,
     }
 
     @classmethod
-    def stype_from_ctype(ffmpeg, ctype):
+    def stype_from_ctype(ffmpeg, ctype: str) -> StreamType:
         return ffmpeg.stype_by_ctype.get(ctype, S_UNKNOWN)
 
 
-class Future:
+class Future(Generic[T]):
+    finished: bool
+    result: Optional[T]
+    exception: Optional[BaseException]
+    _then: List[Callable[[T], None]]
+    _catch: List[Callable[[BaseException], None]]
+
     def __init__(self):
         self.result = None
         self.finished = False
@@ -137,37 +159,38 @@ class Future:
         self._catch = []
 
     # Consumer
-    def then(self, fn):
+    def then(self, fn: Callable[[T], None]) -> Self:
         if self.finished:
-            if not self.exception:
-                fn(self.result)
+            if self.exception is None:
+                fn(self.result) #type:ignore
         else:
             self._then.append(fn)
         return self
 
-    def catch(self, fn):
+    def catch(self, fn: Callable[[BaseException], None]) -> Self:
         if self.finished:
-            if self.exception:
+            if self.exception is not None:
                 fn(self.exception)
         else:
             self._catch.append(fn)
         return self
 
     # Provider
-    def complete(self, result=None):
+    def complete(self, result: T=None) -> Self:
         self.result = result
         self.finished = True
         for c in self._then:
-            c(result)
+            c(result) #type:ignore
         return self
 
-    def fail(self, exception):
+    def fail(self, exception: BaseException) -> Self:
         self.exception = exception
         self.finished = True
         for c in self._catch:
             c(exception)
+        return self
 
-    def __enter__(self):
+    def __enter__(self) -> Callable[[T], Self]:
         return self.complete
 
     def __exit__(self, tp, exc, tb):
@@ -179,7 +202,7 @@ class Future:
 
 
 # == Base Classes ==
-class ObjectWithOptions:
+class ObjectWithOptions(metaclass=ABCMeta):
     """
     Options refer to ffmpeg commandline arguments, referring to a specific Task, File or Stream.
 
@@ -192,17 +215,18 @@ class ObjectWithOptions:
 
     For option names, refer to the FFmpeg documentation.
 
-    Subclasses must provide an 'options' slot.
+    Subclasses must define 'options' slot/property as inheriting multiple __slots__ bases is forbidden.
     """
     __slots__ = ()
-    
-    local_option_names = ()
+    local_option_names: ClassVar[Sequence[str]] = ()
 
-    def __init__(self, *, options=None, **more):
+    options: OptionsDict
+
+    def __init__(self, *, options: OptionsDict=None, **more):
         super().__init__(**more)
-        self.options = options or {}
+        self.options = options or {} #type:ignore
 
-    def apply(self, source, *names, **omap):
+    def apply(self, source: OptionsDict, *names: str, **omap: str) -> Self:
         """
         Selectively apply options from a dictionary.
 
@@ -220,7 +244,7 @@ class ObjectWithOptions:
                     self.options[option] = source[define]
         return self
 
-    def set(self, **options):
+    def set(self, **options: OptionsValue) -> Self:
         """
         Set options on this object
 
@@ -232,7 +256,7 @@ class ObjectWithOptions:
         return self
     
     @property
-    def ffmpeg_options(self):
+    def ffmpeg_options(self) -> OptionsDict:
         if self.local_option_names:
             return {k: v for k, v in self.options.items() if k not in self.local_option_names}
         else:
@@ -240,13 +264,20 @@ class ObjectWithOptions:
 
 
 class ObjectWithMetadata:
+    """
+    (writable) Stream or File metadata. Always strings.
+
+    Subclasses must define 'metadata' slot/property as inheriting multiple __slots__ bases is forbidden.
+    """
     __slots__ = ()
 
-    def __init__(self, *, metadata=None, **more):
-        super().__init__(**more)
-        self.metadata = metadata or {}
+    metadata: Dict[str, str]
 
-    def apply_meta(self, source, *names, **mmap):
+    def __init__(self, *, metadata: Dict[str, str]=None, **more):
+        super().__init__(**more)
+        self.metadata = metadata or {} #type:ignore
+
+    def apply_meta(self, source: Dict[str, str], *names: str, **mmap: str) -> Self:
         for name in names:
             if name in source:
                 self.metadata[name] = source[name]
@@ -256,45 +287,69 @@ class ObjectWithMetadata:
                     self.metadata[key] = source[name]
         return self
 
-    def meta(self, **metadata):
+    def meta(self, **metadata: str) -> Self:
         self.metadata.update(metadata)
         return self
 
 
+class ObjectWithInformation:
+    """
+    Stream or file information from FFprobe. Nested json data.
+
+    Subclasses must define 'information' slot/property as inheriting multiple __slots__ bases is forbidden.
+    """
+    __slots__ = ()
+
+    information: InformationDict
+
+    def __init__(self, info: InformationDict, **more):
+        super().__init__(**more)
+        self.information = info #type:ignore
+
+
 # == Descriptors ==
-class DescriptorBase:
+TOptions = TypeVar("TOptions", bound=OptionsValue)
+
+
+class DescriptorBase(Generic[T, U]):
     __slots__ = "owner", "name"
+    owner: U
+    name: str
 
     def __init__(self, default_name="(Name Unknown)"):
         self.owner = None
         self.name = default_name
 
-    def __set_name__(self, owner, name):
+    def __set_name__(self, owner: U, name: str):
         self.owner = owner
         self.name = name
 
-    repr_info = ""
+    @property
+    def repr_info(self) -> str:
+        return ""
 
     def __repr__(self):
         return "<%s %s of %s%s>" % (type(self).__name__, self.name, self.owner, self.repr_info)
 
 
-class InformationProperty(DescriptorBase):
+class InformationProperty(DescriptorBase[T, ObjectWithInformation]):
     """
     A read-only property referring ffprobe information
     """
     __slots__ = "path", "type"
+    path: Sequence[str]
+    #_ type: Optional[Callable[[Any], T]]
 
-    def __init__(self, *path, type=lambda x: x):
+    def __init__(self, *path: str, type: Optional[Callable[[Any], T]]=None):
         super().__init__()
         self.path = path
         self.type = type
 
     @property
-    def repr_info(self):
+    def repr_info(self) -> str:
         return " referring to %s" % self.path
 
-    def __get__(self, object, obj_type=None):
+    def __get__(self, object: ObjectWithInformation, obj_type=None) -> Optional[T]:
         info = object.information
         try:
             for seg in self.path:
@@ -302,10 +357,10 @@ class InformationProperty(DescriptorBase):
         except (KeyError, IndexError):
             return None
         else:
-            return self.type(info)
+            return self.type(info) if self.type is not None else info #type:ignore
 
 
-class OptionProperty(DescriptorBase):
+class OptionProperty(DescriptorBase[TOptions, ObjectWithOptions]):
     """
     A read-write descriptor referring to ffmpeg options
 
@@ -316,32 +371,37 @@ class OptionProperty(DescriptorBase):
           which will cause the option to be passed without arguments.
     """
     __slots__ = "candidates", "type"
+    candidates: Sequence[str]
+    #_ type: Optional[Callable[[Any], TOptions]]
 
-    def __init__(self, *candidates, type=lambda x: x):
+    def __init__(self, *candidates: str, type: Optional[Callable[[Any], TOptions]]=None):
         super().__init__()
         self.candidates = candidates
         self.type = type
 
     @property
-    def repr_info(self):
+    def repr_info(self) -> str:
         return " referencing option %s" % self.candidates[0]
 
-    def __get__(self, object, obj_type=None):
+    def __get__(self, object: ObjectWithOptions, obj_type=None) -> Optional[TOptions]:
         for candidate in self.candidates:
-            if candidate in object.options:
-                return self.type(object.options[candidate])
+            try:
+                value = object.options[candidate]
+            except KeyError:
+                pass
+            else:
+                return self.type(value) if self.type is not None else value #type:ignore
         else:
             return None
 
-    def __set__(self, object, value):
+    def __set__(self, object: ObjectWithOptions, value: Optional[TOptions]=None):
         for candidate in self.candidates:
             if candidate in object.options:
                 del object.options[candidate]
         if value is not None:
             object.options[self.candidates[0]] = value
-
-    def __delete__(self, object):
-        self.__set__(object, None)
+    
+    __delete__ = __set__
 
 
 # === Stream Classes ===
@@ -351,22 +411,22 @@ class Stream:
 
     One continuous stream of data muxed into a container format
     """
-    __slots__ = "file",
+    __slots__ = 'file', 'pertype_index'
 
-    def __init__(self, file: "File", **more):
+    file: File
+    pertype_index: Optional[int]
+
+    def __init__(self, file: File, pertype_index: int=None, **more):
         super().__init__(**more)
         self.file = file
+        self.pertype_index = pertype_index
 
     @property
     def index(self):
         return 0
 
     @property
-    def pertype_index(self):
-        return None
-
-    @property
-    def type(self):
+    def type(self) -> StreamType:
         return S_UNKNOWN
 
     @property
@@ -382,33 +442,32 @@ class Stream:
 
 
 # Input Streams
-class InputStream(Stream):
+class InputStream(Stream, ObjectWithInformation):
     """
     Holds information about an input stream
     """
-    __slots__ = "information", "pertype_index"
+    __slots__ = 'information',
 
-    def __init__(self, file: "InputFile", info: dict, pertype_index: int=None):
-        super().__init__(file)
+    file: InputFile
 
-        self.information = info
-        self.pertype_index = pertype_index
+    def __init__(self, file: InputFile, **more):
+        super().__init__(file, **more)
 
     @property
-    def type(self):
-        return FFmpeg.stype_from_ctype(self.codec_type)
+    def type(self) -> StreamType:
+        return FFmpeg.stype_from_ctype(self.codec_type) if self.codec_type is not None else S_UNKNOWN
 
     index       = InformationProperty("index", type=int)
 
-    codec       = InformationProperty("codec_name")
-    codec_name  = InformationProperty("codec_long_name")
-    codec_type  = InformationProperty("codec_type")
-    profile     = InformationProperty("profile")
+    codec       = InformationProperty[str]("codec_name")
+    codec_name  = InformationProperty[str]("codec_long_name")
+    codec_type  = InformationProperty[str]("codec_type")
+    profile     = InformationProperty[str]("profile")
 
     duration    = InformationProperty("duration", type=float)
     duration_ts = InformationProperty("duration_ts", type=int)
 
-    start_time  = InformationProperty("start_time")
+    start_time  = InformationProperty[str]("start_time")
 
     bitrate     = InformationProperty("bit_rate", type=int)
     max_bitrate = InformationProperty("max_bit_rate", type=int)
@@ -421,27 +480,27 @@ class InputStream(Stream):
         except KeyError:
             return ()
 
-    language    = InformationProperty("tags", "language")
+    language    = InformationProperty[str]("tags", "language")
 
 
 class InputAudioStream(InputStream):
     __slots__ = ()
 
-    def  __init__(self, file: "InputFile", info: dict, pertype_index: int=None):
-        if info["codec_type"] != "audio":
-            raise ValueError("Cannot create %s from stream info of type %s" % (type(self).__name__, info["codec_type"]))
+    def  __init__(self, file: InputFile, **more):
+        super().__init__(file, **more)
 
-        super().__init__(file, info)
+        if self.codec_type != "audio":
+            raise ValueError("Cannot create %s from stream info of type %s" % (type(self).__name__, self.codec_type))
 
     @property
     def type(self):
         return S_AUDIO
 
-    sample_format   = InformationProperty("sample_format")
+    sample_format   = InformationProperty[str]("sample_format")
     sample_rate     = InformationProperty("sample_rate", type=int)
 
     channels        = InformationProperty("channels", type=int)
-    channel_layout  = InformationProperty("channel_layout")
+    channel_layout  = InformationProperty[str]("channel_layout")
 
 
 class InputAttachmentStream(InputStream):
@@ -451,15 +510,15 @@ class InputAttachmentStream(InputStream):
     def type(self):
         return S_ATTACHMENT
 
-    og_filename = InformationProperty("tags", "filename")
-    mimetype    = InformationProperty("tags", "mimetype")
+    og_filename = InformationProperty[str]("tags", "filename")
+    mimetype    = InformationProperty[str]("tags", "mimetype")
 
 
-def input_stream_factory(file, info, pertype_index=None):
+def input_stream_factory(file: InputFile, info: InformationDict, pertype_index: int=None) -> InputStream:
     return {
         "audio": InputAudioStream,
         "attachment": InputAttachmentStream,
-    }.get(info["codec_type"], InputStream)(file, info, pertype_index)
+    }.get(info["codec_type"], InputStream)(file, info=info, pertype_index=pertype_index)
 
 
 # Output Streams
@@ -467,19 +526,21 @@ class OutputStream(Stream, ObjectWithOptions, ObjectWithMetadata):
     """
     Holds information about a mapped output stream
     """
-    __slots__ = "index", "pertype_index", "source", "options", "metadata"
+    __slots__ = 'source', 'index', 'options', 'metadata'
+
+    file: OutputFile
+    source: InputStream
+    index: int
 
     # TODO: support other parameters like frame resolution
-
-    def __init__(self, file: "OutputFile", source: InputStream, stream_id: int, stream_pertype_id: int=None,
-                 options: Mapping=None, metadata: MutableMapping=None):
-        super().__init__(file=file, options=options, metadata=metadata)
+    def __init__(self, file: OutputFile, source: InputStream, stream_id: int, stream_pertype_id: int=None,
+                 options: OptionsDict=None, metadata: MutableMapping=None):
+        super().__init__(file=file, options=options, metadata=metadata, pertype_index=stream_pertype_id)
         self.index = stream_id
-        self.pertype_index = stream_pertype_id
         self.source = source
 
     @property
-    def type(self):
+    def type(self) -> StreamType:
         return self.source.type
 
     def _update_indices(self, index: int, pertype_index: int=None):
@@ -488,23 +549,27 @@ class OutputStream(Stream, ObjectWithOptions, ObjectWithMetadata):
         if pertype_index is not None:
             self.pertype_index = pertype_index
 
-    codec = OptionProperty("codec", "c")
+    codec = OptionProperty[str]("codec", "c")
 
     bitrate = OptionProperty("b", type=FFmpeg.int)
 
 
 class OutputAudioStream(OutputStream):
-    channels = OptionProperty("ac")
+    __slots__ = ()
+
+    channels = OptionProperty("ac", type=int)
 
 
 class OutputVideoStream(OutputStream):
-    def downscale(self, width, height):
+    __slots__ = ()
+
+    def downscale(self, width: int, height: int) -> Self:
         # Scale while keeping aspect ratio; never upscale.
         self.options["filter_complex"] = "scale=iw*min(1\,min(%i/iw\,%i/ih)):-1" % (width, height)
         return self
 
 
-def output_stream_factory(file, source, *args, **more):
+def output_stream_factory(file: OutputFile, source: InputStream, *args, **more) -> OutputStream:
     return {
         S_AUDIO: OutputAudioStream,
         S_VIDEO: OutputVideoStream,
@@ -512,20 +577,24 @@ def output_stream_factory(file, source, *args, **more):
 
 
 # === File Classes ===
-class BaseFile:
-    __slots__ = "path",
+TStream = TypeVar("TStream", bound=Stream)
+
+
+class BaseFile(metaclass=ABCMeta):
+    __slots__ = 'path',
+
+    path: Path
 
     def __init__(self, path: Path, **more):
         super().__init__(**more)
-
         self.path = Path(path)
 
-    def generate_args(self):
-        raise NotImplementedError("generate_args not implemented on base file")
+    @abstractmethod
+    def generate_args(self) -> Iterator[str]: ...
 
     # Filename
     @property
-    def name(self):
+    def name(self) -> str:
         """
         The file's name
         Changed in 3.0: previously, full path
@@ -533,142 +602,118 @@ class BaseFile:
         return self.path.name
 
     @name.setter
-    def name(self, value):
+    def name(self, value: str):
         self.path = self.path.with_name(value)
 
     @property
-    def filename(self):
+    def filename(self) -> str:
         """
         The file's full path as string
         """
         return str(self.path)
 
     @filename.setter
-    def filename(self, value):
+    def filename(self, value: str):
         self.path = Path(value)
 
-    # Streams
-    @property
-    def streams(self) -> Sequence:
-        return ()
 
-    video_streams = audio_streams = subtitle_streams = attachment_streams = data_streams = streams
-
-
-class File(BaseFile, ObjectWithOptions):
+class File(BaseFile, ObjectWithOptions, Generic[TStream]):
     """
     ABC for Input- and Output-Files
     """
-    __slots__ = "_streams", "_streams_by_type", "options"
+    __slots__ = '_streams', '_streams_by_type', 'options'
 
-    def __init__(self, path: Path, options: dict=None, **more):
-        super().__init__(path=path, options=options, **more)
+    _streams: Sequence[TStream]
+    _streams_by_type: Mapping[StreamType, Sequence[TStream]]
 
+    def __init__(self, path: Path, **more):
+        super().__init__(path=path, **more)
         self._streams = []
-        """ :type: list[Stream] """
-
-        self._streams_by_type = collections.defaultdict(list)
-        """ :type: dict[str, list[Stream]] """
+        self._streams_by_type = defaultdict(list)
 
     # Streams
-    def _add_stream(self, stream: Stream):
-        """ Add a stream """
-        stream._update_indices(len(self._streams), len(self._streams_by_type[stream.type]))
-        self._streams.append(stream)
-        self._streams_by_type[stream.type].append(stream)
-
     @property
-    def streams(self) -> Sequence:
-        """ The streams contained in this file
-
-        :rtype: Sequence[Stream]
-        """
+    def streams(self) -> Sequence[TStream]:
+        """ The streams contained in this file """
         return self._streams
 
     @property
-    def video_streams(self) -> Sequence:
-        """ All video streams
-
-        :rtype: Sequence[Stream]
-        """
+    def video_streams(self) -> Sequence[TStream]:
+        """ All video streams """
         return self._streams_by_type[S_VIDEO]
 
     @property
-    def audio_streams(self) -> Sequence:
-        """ All audio streams
-
-        :rtype: Sequence[Stream]
-        """
+    def audio_streams(self) -> Sequence[TStream]:
+        """ All audio streams """
         return self._streams_by_type[S_AUDIO]
 
     @property
-    def subtitle_streams(self) -> Sequence:
-        """ All subtitle streams
-
-        :rtype: Sequence[Stream]
-        """
+    def subtitle_streams(self) -> Sequence[TStream]:
+        """ All subtitle streams """
         return self._streams_by_type[S_SUBTITLE]
 
     @property
-    def attachment_streams(self) -> Sequence:
-        """ All attachment streams (i.e. Fonts)
-
-        :rtype: Sequence[Stream]
-        """
+    def attachment_streams(self) -> Sequence[TStream]:
+        """ All attachment streams (i.e. Fonts) """
         return self._streams_by_type[S_ATTACHMENT]
 
     @property
-    def data_streams(self) -> Sequence:
-        """ All data streams
-
-        :rtype: Sequence[Stream]
-        """
+    def data_streams(self) -> Sequence[TStream]:
+        """ All data streams """
         return self._streams_by_type[S_DATA]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "<%s \"%s\">" % (type(self).__name__, self.name)
 
 
-class InputFileChapter:
-    __slots__ = "file", "information"
+class InputFileChapter(ObjectWithInformation):
+    __slots__ = 'file', 'information'
 
-    def __init__(self, file, info):
+    file: InputFile
+
+    def __init__(self, file: InputFile, info: InformationDict):
+        super().__init__(info=info)
         self.file = file
-        self.information = info
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "<InputFileChapter #%i of %s from %.0fs to %.0fs (%s)>" \
-                % (self.index, self.file, self.start_time, self.end_time, self.title)
+                % (self.index or 0, self.file, self.start_time or 0, self.end_time or 0, self.title)
 
     start_time  = InformationProperty("start_time", type=float)
     end_time    = InformationProperty("end_time", type=float)
 
     index       = InformationProperty("id", type=int)
-    title       = InformationProperty("tags", "title")
+    title       = InformationProperty[str]("tags", "title")
 
 
-class InputFile(File):
+class InputFile(File[InputStream], ObjectWithInformation):
     """
     Holds information about an input file
 
     :note: Modifying the options after accessing the streams results in undefined
             behaviour! (Currently: Changes will only apply to conv call)
     """
-    __slots__ = "pp", "_information"
-
+    __slots__ = 'pp', '_information'
     stream_factory = staticmethod(input_stream_factory)
 
-    def __init__(self, pp: "AdvancedAV", path: str, options: Mapping=None, info=None):
-        super().__init__(path, options=dict(options.items()) if options else None)
+    pp: AdvancedAV
+    _information: Optional[InformationDict]
 
+    def __init__(self, pp: AdvancedAV, path: Path, options: OptionsDict=None, info=None):
+        super().__init__(path, options=dict(options.items()) if options else None, info=info)
         self.pp = pp
-        self._information = info
 
-    @property
+    @property #type:ignore # Mypy doesn't support overriding with properties
+    def information(self) -> InformationDict: #type:ignore
+        return self._information if self._information is not None else self._initialize_info()
+    
+    @information.setter
+    def information(self, info: InformationDict):
+        self._information = info
+    
+    @information.deleter
     def information(self):
-        if self._information is None:
-            self._initialize_info()
-        return self._information
+        pass
 
     def generate_args(self) -> Iterator:
         # Input options
@@ -681,8 +726,9 @@ class InputFile(File):
     # -- Initialize
     ffprobe_args = "-show_format", "-show_streams", "-show_chapters", "-print_format", "json"
 
-    def _initialize_info(self):
-        self._information = self.pp.probe_file(self, ffprobe_args_hint=self.ffprobe_args)
+    def _initialize_info(self) -> InformationDict:
+        self._information = info = self.pp.probe_file(self, ffprobe_args_hint=self.ffprobe_args)
+        return info
 
     def _initialize_streams(self):
         """ Parse the ffprobe output
@@ -697,61 +743,43 @@ class InputFile(File):
 
     # -- Streams
     @property
-    def streams(self) -> Sequence:
-        """ Collect the available streams
-
-        :rtype: Sequence[InputStream]
-        """
+    def streams(self) -> Sequence[InputStream]:
+        """ Collect the available streams """
         if not self._streams:
             self._initialize_streams()
         return self._streams
 
     @property
-    def video_streams(self) -> Sequence:
-        """ All video streams
-
-        :rtype: Sequence[InputStream]
-        """
+    def video_streams(self) -> Sequence[InputStream]:
+        """ All video streams """
         if not self._streams:
             self._initialize_streams()
         return self._streams_by_type[S_VIDEO]
 
     @property
-    def audio_streams(self) -> Sequence:
-        """ All audio streams
-
-        :rtype: Sequence[InputStream]
-        """
+    def audio_streams(self) -> Sequence[InputStream]:
+        """ All audio streams """
         if not self._streams:
             self._initialize_streams()
         return self._streams_by_type[S_AUDIO]
 
     @property
-    def subtitle_streams(self) -> Sequence:
-        """ All subtitle streams
-
-        :rtype: Sequence[InputStream]
-        """
+    def subtitle_streams(self) -> Sequence[InputStream]:
+        """ All subtitle streams """
         if not self._streams:
             self._initialize_streams()
         return self._streams_by_type[S_SUBTITLE]
 
     @property
-    def attachment_streams(self) -> Sequence:
-        """ All attachment streams (i.e. Fonts)
-
-        :rtype: Sequence[InputStream]
-        """
+    def attachment_streams(self) -> Sequence[InputStream]:
+        """ All attachment streams (i.e. Fonts) """
         if not self._streams:
             self._initialize_streams()
         return self._streams_by_type[S_ATTACHMENT]
 
     @property
-    def data_streams(self) -> Sequence:
-        """ All data streams
-
-        :rtype: Sequence[InputStream]
-        """
+    def data_streams(self) -> Sequence[InputStream]:
+        """ All data streams """
         if not self._streams:
             self._initialize_streams()
         return self._streams_by_type[S_DATA]
@@ -765,11 +793,11 @@ class InputFile(File):
     bitrate     = InformationProperty("format", "bit_rate", type=int)
 
     # Metadata
-    metadata    = InformationProperty("format", "tags")
+    metadata    = InformationProperty[Dict[str, str]]("format", "tags")
 
-    title       = InformationProperty("format", "tags", "title")
-    artist      = InformationProperty("format", "tags", "artist")
-    album       = InformationProperty("format", "tags", "album")
+    title       = InformationProperty[str]("format", "tags", "title")
+    artist      = InformationProperty[str]("format", "tags", "artist")
+    album       = InformationProperty[str]("format", "tags", "album")
 
     # Chapters
     @property
@@ -777,32 +805,36 @@ class InputFile(File):
         return list(InputFileChapter(self, i) for i in self.information["chapters"])
 
 
-class OutputFile(File, ObjectWithMetadata):
+InputFileRef = Union[InputFile, Path, str]
+
+
+class OutputFile(File[OutputStream], ObjectWithMetadata):
     """
     Holds information about an output file
     """
-    __slots__ = "task", "container", "_mapped_sources", "metadata"
-
-    local_option_names = ("reorder_streams",) + File.local_option_names
-
+    __slots__ = 'task', 'container', '_mapped_sources', 'metadata'
+    local_option_names = ("reorder_streams", *File.local_option_names)
     stream_factory = staticmethod(output_stream_factory)
 
-    def __init__(self, task: "Task", name: str, container=None,
+    task: Task
+    name: str
+    container: Optional[str]
+    _streams: MutableSequence[OutputStream]
+    _streams_by_type: Mapping[StreamType, MutableSequence[OutputStream]]
+    _mapped_sources: MutableSet[InputStream]
+
+    def __init__(self, task: "Task", path: Path, container=None,
             options: Mapping=None, metadata: Mapping=None):
-        super().__init__(name, options=options, metadata=metadata)
+        super().__init__(path, options=options, metadata=metadata)
 
         #self.options.setdefault("c", "copy")
         self.options.setdefault("reorder_streams", True)
 
         self.task = task
-
         self.container = container
-        """ :type: dict[str, str] """
-
         self._mapped_sources = set()
-        """ :type: set[InputStream] """
 
-    def generate_args(self) -> Iterator:
+    def generate_args(self) -> Iterator[str]:
         # Global Metadata & Additional Options
         yield from FFmpeg.argv_metadata(self.metadata)
         yield from FFmpeg.argv_options(self.ffmpeg_options)
@@ -813,7 +845,10 @@ class OutputFile(File, ObjectWithMetadata):
 
         for stream in self.streams:
             yield "-map"
-            yield self.task.qualified_input_stream_spec(stream.source)
+            id = self.task.qualified_input_stream_spec(stream.source)
+            if id is None:
+                raise AdvancedAVError("Could not determine id for stream %r" % stream)
+            yield id
 
             if stream.codec is not None:
                 yield "-c:%s" % stream.stream_spec
@@ -831,6 +866,12 @@ class OutputFile(File, ObjectWithMetadata):
         yield self.filename if self.filename[0] != "-" else "./" + self.filename
 
     # -- Map Streams
+    def _add_stream(self, stream: OutputStream):
+        """ Add a stream """
+        stream._update_indices(len(self._streams), len(self._streams_by_type[stream.type]))
+        self._streams.append(stream)
+        self._streams_by_type[stream.type].append(stream)
+
     def map_stream_(self, stream: InputStream, codec: str=None, options: Mapping=None) -> OutputStream:
         """ map_stream() minus add_input_file
 
@@ -866,32 +907,28 @@ class OutputFile(File, ObjectWithMetadata):
         for out in self._streams:
             if out.source == stream:
                 return out
+        raise KeyError()
 
     # -- Map multiple Streams
-    def map_all_streams(self, file: "str | InputFile", return_existing: bool=False) -> Sequence:
+    def map_all_streams(self, file: InputFileRef, return_existing: bool=False) -> Sequence[OutputStream]:
         """ Map all streams in \param file
 
         Note that this will only map streams that are not already mapped.
-
-        :rtype: Sequence[OutputStream]
         """
-        out_streams = []
+        out_streams: List[OutputStream] = []
         for stream in self.task.add_input(file).streams:
             if stream in self._mapped_sources:
                 if return_existing:
-                    out_streams.append(self.get_mapped_stream(stream))
+                    out_streams.append(self.get_mapped_stream(stream)) #
             else:
                 out_streams.append(self.map_stream_(stream))
 
         return out_streams
 
-    def merge_all_files(self, files: Iterable, return_existing: bool=False) -> Sequence:
+    def merge_all_files(self, files: Iterable[InputFileRef], return_existing: bool=False) -> Sequence[OutputStream]:
         """ Map all streams from multiple files
 
         Like map_all_streams(), this will only map streams that are not already mapped.
-
-        :type files: Iterable[str | InputFile]
-        :rtype: Sequence[OutputStream]
         """
         out_streams = []
         for file in files:
@@ -935,11 +972,14 @@ class AttachmentOutputStream(Stream):
 
 
 class AttachmentOutputFile(BaseFile):
-    __slots__ = "source"
+    __slots__ = 'source',
 
     def __init__(self, source: InputAttachmentStream, path: Path=None):
         if path is None:
-            path = source.og_filename
+            if source.og_filename is not None:
+                path = Path(source.og_filename.lstrip('/'))
+            else:
+                raise RuntimeError("Couldn't detect attachment filename")
 
         super().__init__(path=path)
 
@@ -957,23 +997,32 @@ class AttachmentOutputFile(BaseFile):
 
 
 # === Task Classes ===
-class BaseTask:
+class BaseTask(metaclass=ABCMeta):
     """
     Task base class
     """
-    def __init__(self, pp: "AdvancedAV"):
+    pp: AdvancedAV
+
+    @property
+    @abstractmethod
+    def inputs(self) -> Sequence[InputFile]: ...
+
+    @property
+    @abstractmethod
+    def outputs(self) -> Sequence[OutputFile]: ...
+
+
+    def __init__(self, pp: AdvancedAV):
         super().__init__()
 
         self.pp = pp
 
     # -- Inputs
-    # inputs: Sequence[InputFile]
-
     @property
     def inputs_by_name(self) -> Mapping[str, InputFile]:
         return {i.name: i for i in self.inputs}
 
-    def qualified_input_stream_spec(self, stream: InputStream) -> str:
+    def qualified_input_stream_spec(self, stream: InputStream) -> Optional[str]:
         """ Construct the qualified input stream spec (combination of input file number and stream spec)
 
         None will be returned if stream's file isn't registered as an input to this Task
@@ -981,13 +1030,14 @@ class BaseTask:
         file_index = self.inputs.index(stream.file)
         if file_index >= 0:
             return "{}:{}".format(file_index, stream.stream_spec)
+        return None
 
     # -- Input Streams
     def iter_video_streams(self) -> Iterator[InputStream]:
         for input_ in self.inputs:
             yield from input_.video_streams
 
-    def iter_audio_streams(self) -> Iterator[InputAudioStream]:
+    def iter_audio_streams(self) -> Iterator[InputStream]:
         for input_ in self.inputs:
             yield from input_.audio_streams
 
@@ -1011,9 +1061,6 @@ class BaseTask:
         for input_ in self.inputs:
             yield from input_.chapters
 
-    # -- Outputs
-    # outputs: Sequence[OutputFile]
-
     # -- FFmpeg
     def generate_args(self) -> Iterator[str]:
         """ Generate the ffmpeg commandline for this task
@@ -1024,13 +1071,13 @@ class BaseTask:
         # dumping attachments is inherently creating output files
         # and shouldn't be done by an input option
         # This HACK may or may not stay in final v3....
-        attachment_dumps = [o for o in self.outputs if isinstance(o, AttachmentOutputFile)]
+        attachment_dumps: Sequence[AttachmentOutputFile] = [o for o in self.outputs if isinstance(o, AttachmentOutputFile)] #type:ignore
 
         # Inputs
         for input_ in self.inputs:
-            for output in attachment_dumps:
-                if output.source.file is input_:
-                    yield from output.generate_args()
+            for att in attachment_dumps:
+                if att.source.file is input_:
+                    yield from att.generate_args()
 
             yield from input_.generate_args()
 
@@ -1039,7 +1086,7 @@ class BaseTask:
             if output not in attachment_dumps:
                 yield from output.generate_args()
 
-    def commit(self, additional_args: Iterable=(), immediate=True, **args):
+    def commit(self, additional_args: Sequence[str]=(), immediate=True, **args):
         """
         Commit the changes.
 
@@ -1067,11 +1114,11 @@ class BaseTask:
         return self.pp.commit_task(self, **args)
 
     # -- Managing the task
-    def split(self, pieces=0) -> Sequence["PartialTask"]:
+    def split(self, pieces=0) -> Sequence[PartialTask]:
         """
         Split a task into min(pieces, len(outputs)) partial tasks
         """
-        parts = []
+        parts: List[List[OutputFile]] = []
 
         if pieces > 0:
             for i in range(min(len(self.outputs), pieces)):
@@ -1087,19 +1134,21 @@ class BaseTask:
 
 
 class PartialTask(BaseTask):
-    def __init__(self, parent, outs):
+    parent: BaseTask
+    outputs: Sequence[OutputFile] = []
+
+    def __init__(self, parent: BaseTask, outs: Sequence[OutputFile]):
         super().__init__(parent.pp)
 
         self.parent = parent
-
         self.outputs = outs
 
     @property
-    def inputs(self):
+    def inputs(self) -> Sequence[InputFile]:
         return self.parent.inputs
 
     @property
-    def inputs_by_name(self):
+    def inputs_by_name(self) -> Mapping[str, InputFile]:
         return self.parent.inputs_by_name
 
 
@@ -1111,23 +1160,22 @@ class Task(BaseTask):
     While OutputFiles are bound to one task at a time, InputFiles can be reused across Tasks.
     """
 
-    output_factory = OutputFile
+    output_factory: ClassVar[Callable] = OutputFile
 
-    inputs_by_name = None
+    # XXX: must have assignments here to clear class-level abstractmethods
+    inputs: MutableSequence[InputFile] = []
+    inputs_by_name: MutableMapping[str, InputFile] = {}
+    outputs: MutableSequence[OutputFile] = []
 
     def __init__(self, pp: "AdvancedAV"):
         super().__init__(pp)
 
         self.inputs = []
-        """ :type: list[InputFile] """
         self.inputs_by_name = {}
-        """ :type: dict[str, InputFile] """
-
         self.outputs = []
-        """ :type: list[OutputFile] """
 
     # -- Manage Inputs
-    def add_input(self, file: "str | InputFile") -> InputFile:
+    def add_input(self, file: InputFileRef) -> InputFile:
         """ Register an input file
 
         When \param file is already registered as input file to this Task, do nothing.
@@ -1137,18 +1185,19 @@ class Task(BaseTask):
         """
         if  isinstance(file, PurePath): # Pathlib support
             file = str(file)
-        if  isinstance(file, str):
+        if isinstance(file, InputFile):
+            input_ = file
+        else:
             if file in self.inputs_by_name:
                 return self.inputs_by_name[file]
+            input_ = self.pp.create_input(file)
 
-            file = self.pp.create_input(file)
+        if input_ not in self.inputs:
+            self.pp.to_debug("Adding input file #%i: %s", len(self.inputs), input_.name)
+            self.inputs.append(input_)
+            self.inputs_by_name[input_.filename] = input_
 
-        if file not in self.inputs:
-            self.pp.to_debug("Adding input file #%i: %s", len(self.inputs), file.name)
-            self.inputs.append(file)
-            self.inputs_by_name[file.filename] = file
-
-        return file
+        return input_
 
     # -- Manage Outputs
     def add_output(self, filename: str, container: str=None, options: Mapping=None) -> OutputFile:
@@ -1166,16 +1215,16 @@ class Task(BaseTask):
             return outfile
 
     # -- Attachment Shenanigans
-    def dump_attachment(self, attachment: InputAttachmentStream, filename: str=None) -> AttachmentOutputFile:
+    def dump_attachment(self, attachment: InputAttachmentStream, filename: Union[str, Path]=None) -> AttachmentOutputFile:
         for outfile in self.outputs:
             if outfile.filename == filename:
-                raise AdvancedAVError("Output file '%s' already added." % file)
+                raise AdvancedAVError("Output file '%s' already added." % filename)
         else:
             if attachment.type != S_ATTACHMENT:
                 raise AdvancedAVError("Stream %r not an attachment!" % attachment)
-            outfile = AttachmentOutputFile(attachment, filename)
-            self.outputs.append(outfile)
-            return outfile
+            aoutfile = AttachmentOutputFile(attachment, Path(filename)if filename is not None else None)
+            self.outputs.append(aoutfile) #type: ignore #FIXME
+            return aoutfile
 
 
 class SimpleTask(Task):
@@ -1195,7 +1244,8 @@ class SimpleTask(Task):
         return getattr(self.output, attr)
 
     # Allow assignment to these OutputFile members
-    def _redir(attr, name):
+    @staticmethod # XXX: requires python 3.10+. Remove for earlier, but breaks typecheck
+    def _redir(attr: str, name: str):
         def redir_get(self):
             return getattr(getattr(self, attr), name)
         def redir_set(self, value):
@@ -1249,7 +1299,7 @@ class AdvancedAV(metaclass=ABCMeta):
 
     # ---- Process Tasks ----
     @abstractmethod
-    def commit_task(self, task: Task, *, add_ffmpeg_args: Sequence[str]=None, immediate: bool=False) -> Future:
+    def commit_task(self, task: BaseTask, *, add_ffmpeg_args: Sequence[str]=None, immediate: bool=False) -> Future:
         """
         Execute a task
 
@@ -1260,7 +1310,7 @@ class AdvancedAV(metaclass=ABCMeta):
 
     # ---- Analyze Files ----
     @abstractmethod
-    def probe_file(self, path, *, ffprobe_args_hint: Sequence[str]=None) -> Mapping[str, object]:
+    def probe_file(self, path, *, ffprobe_args_hint: Sequence[str]=None) -> InformationDict:
         """
         Analyze a media file
 
@@ -1271,15 +1321,15 @@ class AdvancedAV(metaclass=ABCMeta):
         """
 
     # ---- Create InputFiles ----
-    def create_input(self, filename: str, options=None):
+    def create_input(self, path: Union[Path, str], options=None):
         """
         Create a InputFile instance
-        :param filename: str The filename
-        :param optiona: Mapping Additional Options
+        :param path: str The filename
+        :param options: Mapping Additional Options
         :return: A InputFile instance
         NOTE that Task.add_input is usually the preferred way to create inputs
         """
-        return self.input_factory(self, filename, options=options)
+        return self.input_factory(self, Path(path), options=options)
 
 
 class SimpleAV(AdvancedAV):
@@ -1341,8 +1391,7 @@ class SimpleAV(AdvancedAV):
         out, err = proc.communicate()
 
         if proc.returncode != 0:
-            err = err.decode("utf-8", "replace")
-            msg = err.strip().split('\n')[-1]
+            msg = err.decode("utf-8", "replace").strip().split('\n')[-1]
             raise AdvancedAVError(msg)
 
         return out.decode("utf-8", "replace")
@@ -1361,7 +1410,7 @@ class MultiAV(SimpleAV):
         self.concurrent = workers
 
         self.workers = {}
-        self.queue = collections.deque()
+        self.queue = deque()
 
     # Enqueue
     def commit_task(self, task, *, add_ffmpeg_args=(), immediate=False):
