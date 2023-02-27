@@ -334,7 +334,8 @@ class BinaryVdfParser:
 
 
 class AppInfoFile:
-    S_APP_HEADER = struct.Struct("<IIIIQ20sI")
+    S_APP_HEADER    = struct.Struct("<IIIIQ20sI")
+    S_APP_HEADER_V2 = struct.Struct("<IIIIQ20sI20s")
     S_INT4 = struct.Struct("<I")
 
     @classmethod
@@ -353,7 +354,7 @@ class AppInfoFile:
         return self.parser.parse(self.file)
 
     class App:
-        __slots__ = "appinfo", "offset", "id", "size", "state", "last_update", "token", "hash", "changeset", "_data"
+        __slots__ = "appinfo", "offset", "id", "size", "state", "last_update", "token", "hash", "changeset", "hash_bin", "_data"
 
         def __init__(self, appinfo,  offset, struct):
             self.id = struct[0]
@@ -363,6 +364,7 @@ class AppInfoFile:
             self.token = struct[4]
             self.hash = struct[5]
             self.changeset = struct[6]
+            self.hash_bin = struct[7] if len(struct) > 7 else None
             self.appinfo = appinfo
             self.offset = offset
             self._data = None
@@ -396,13 +398,17 @@ class AppInfoFile:
 
     def _load(self):
         magic = self._read_exactly(4)
-        if magic != b"\x27\x44\x56\x07":
-            raise ValueError("Wrong appinfo.vdf magic")
+        if magic == b"\x28\x44\x56\x07":
+            header_struct = self.S_APP_HEADER_V2
+        elif magic == b"\x27\x44\x56\x07":
+            header_struct = self.S_APP_HEADER
+        else:
+            raise ValueError("Unknown appinfo.vdf magic")
 
         self._universe = self._read_int()
         self._apps = {}
 
-        buffer = bytearray(self.S_APP_HEADER.size)
+        buffer = bytearray(header_struct.size)
 
         while True:
             read = self.file.readinto(buffer)
@@ -410,17 +416,17 @@ class AppInfoFile:
             if read < 4:
                 raise EOFError()
 
-            struct = self.S_APP_HEADER.unpack(buffer)
+            struct = header_struct.unpack(buffer)
             appid, size, *_ = struct
 
             if appid == 0:
                 return # Done
-            elif read < self.S_APP_HEADER.size:
+            elif read < header_struct.size:
                 raise EOFError()
 
             self._apps[appid] = self.App(self, self.file.tell(), struct)
 
-            self.file.seek(size - (self.S_APP_HEADER.size - 8), io.SEEK_CUR)
+            self.file.seek(size - (header_struct.size - 8), io.SEEK_CUR)
 
     @property
     def universe(self):
