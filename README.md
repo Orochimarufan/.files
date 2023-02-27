@@ -60,6 +60,8 @@ Contains utility applications I'd hate to miss
 - videothumb        : Create (PSP compatible) thumbnails for video files.
 - visualsleep       : Sleep command with countdown timer.
 - xconv             : A simple, profile-based, batch-enabled "frontend" to ffmpeg.
+- sync_savegames    : My personal implementation of steamsync
+- protontool        : Tool for inspecting Steam and Proton's local state
 
 ###### Broken
 - mpr               : Control and listen to mpd stream at the same time.
@@ -96,6 +98,9 @@ Contains support libraries
 - vdfparser.py      : A simple parser for Valve's VDF Key/Value format
 - xconv/            : Supporting library for xconv media conversion utility
     - profiles/     : (Virtual) package containing xconv profiles
+- propex.py         : Some utility property descriptor classes
+- steamutil.py      : Library for working with Steam's local state/cache files
+- steamsync.py      : Library for easily building custom savegame synchronization. See bin/sync_savegames
 
 
 .files/git

@@ -350,7 +350,9 @@ class AbstractCommonPaths:
                 return buf.value
             return self._path_factory(get_my_documents())
 
-    class Wine(Common[P]):
+    class Wine(WindowsCommon[P]):
+        is_native_windows: bool = False
+        is_wine: bool = True
         _wine_prefix: Path
 
         def __init__(self, *, prefix, **kwds):
