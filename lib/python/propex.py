@@ -1,9 +1,18 @@
 # Custom property-like classes
-from typing import Dict, Literal, MutableMapping, NewType, Optional, Sequence, Generic, TypeVar, Callable, Type, Any, Mapping, overload, Union
+from typing import MutableMapping, NewType, Optional, Sequence, Generic, TypeVar, Callable, Type, Any, overload, Union
+
+try:
+    from typing import Self
+except ImportError:
+    try:
+        from typing_extensions import Self
+    except ImportError:
+        Self = Any
 
 
 T = TypeVar('T')
 O = TypeVar('O')
+Ow = TypeVar('Ow', covariant=True)
 
 
 class CustomProperty(property, Generic[T]):
@@ -23,7 +32,7 @@ class CustomProperty(property, Generic[T]):
         self.property_name = name
 
     @overload # type: ignore
-    def __get__(self, obj: None, cls: Type[O]) -> 'CustomProperty[T]': ...
+    def __get__(self, obj: None, cls: Type[O]) -> Self: ...
     @overload
     def __get__(self, obj: O, cls: Type[O]) -> T: ...
 
@@ -39,7 +48,7 @@ class CustomProperty(property, Generic[T]):
         raise AttributeError(f"Cannot delete property {self.property_name} of {obj!r}")
 
 
-class CachedProperty(CustomProperty[T]):
+class CachedProperty(CustomProperty[T], Generic[T, Ow]):
     """ A property that is only computed once per instance and then replaces
         itself with an ordinary attribute. Deleting the attribute resets the
         property.
@@ -47,20 +56,23 @@ class CachedProperty(CustomProperty[T]):
         Source: https://github.com/bottlepy/bottle/commit/fa7733e075da0d790d809aa3d2f53071897e6f76
         """
 
-    def __init__(self, func: Callable[[O], T]):
+    def __init__(self, func: Callable[[Ow], T]):
         self.__doc__ = getattr(func, '__doc__')
         self.func = func
         self.property_name = func.__name__
 
-    def __get__(self, obj: Optional[O], cls: Type[O]): # type: ignore
+    def __get__(self, obj: Optional[Ow], cls: Type[Ow]): # type: ignore[override]
         if obj is None:
             return self
         value = obj.__dict__[self.property_name] = self.func(obj)
         return value
 
+    def __delete__(self, obj: Ow): # type: ignore[override,misc]
+        del obj.__dict__[self.property_name]
 
-class SettableCachedProperty(CachedProperty[T]):
-    def __set__(self, obj: O, value: T):
+
+class SettableCachedProperty(CachedProperty[T, O]):
+    def __set__(self, obj: O, value: T): #type: ignore[override]
         obj.__dict__[self.property_name] = value
 
 
@@ -113,4 +125,10 @@ class DictPathProperty(DictPathRoProperty[T]):
         del self._get_parent(obj)[self.path[-1]]
 
 
-__all__ = ['CustomProperty', 'CachedProperty', 'SettableCachedProperty', 'DictPathRoProperty', 'DictPathProperty']
+# functools.cached_property polyfill
+try:
+    from functools import cached_property
+except ImportError:
+    cached_property = CachedProperty # type: ignore[assignment,misc]
+
+__all__ = ['CustomProperty', 'CachedProperty', 'SettableCachedProperty', 'DictPathRoProperty', 'DictPathProperty', 'cached_property']

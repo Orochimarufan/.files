@@ -5,31 +5,44 @@
 
 from __future__ import unicode_literals
 
+import datetime
 import io
 import struct
-import datetime
+from typing import (Any, Dict, Iterator, Mapping, NewType, Optional, Sequence,
+                    Tuple, Type, TypeVar, Union, overload)
 
-from typing import Any, Dict, Optional, Sequence, Type, TypeVar, Union, Mapping, Tuple, NewType, cast, overload
+try:
+    from functools import cached_property
+except ImportError:
+    from propex import cached_property
+try:
+    from typing import Self
+except ImportError:
+    try:
+        from typing_extensions import Self
+    except ImportError:
+        Self = Any
 
 #### Nested dictionary support
 # Mypy doesn't support recursive types :(
-DeepDict = Mapping[str, Union[Mapping[str,  Any], str]]
+DeepDict = Mapping[str, Union['DeepDict', str]]
+DeepDictPath = Sequence[Union[str, Sequence[str]]]
 
 _NoDefault = NewType('_NoDefault', object)
 _nodefault = _NoDefault(object())
 _DefaultT = TypeVar('_DefaultT', DeepDict, str, None)
-_DDCastT = TypeVar('_DDCastT', DeepDict, str)
+_DDCastT = TypeVar('_DDCastT', DeepDict, str, Dict[str, str])
 
 @overload
-def dd_getpath(dct: DeepDict, path: Sequence[str], default: _NoDefault=_nodefault, *, t: None=None) -> Union[DeepDict, str]: ...
+def dd_getpath(dct: DeepDict, path: DeepDictPath, default: _NoDefault=_nodefault, *, t: None=None) -> Union[DeepDict, str]: ...
 @overload
-def dd_getpath(dct: DeepDict, path: Sequence[str], default: _DefaultT, *, t: None=None) -> Union[DeepDict, str, _DefaultT]: ...
+def dd_getpath(dct: DeepDict, path: DeepDictPath, default: _DefaultT, *, t: None=None) -> Union[DeepDict, str, _DefaultT]: ...
 @overload
-def dd_getpath(dct: DeepDict, path: Sequence[str], default: _NoDefault=_nodefault, *, t: Type[_DDCastT]) -> _DDCastT: ...
+def dd_getpath(dct: DeepDict, path: DeepDictPath, default: _NoDefault=_nodefault, *, t: Type[_DDCastT]) -> _DDCastT: ...
 @overload
-def dd_getpath(dct: DeepDict, path: Sequence[str], default: _DefaultT, *, t: Type[_DDCastT]) -> Union[_DDCastT, _DefaultT]: ...
+def dd_getpath(dct: DeepDict, path: DeepDictPath, default: _DefaultT, *, t: Type[_DDCastT]) -> Union[_DDCastT, _DefaultT]: ...
 
-def dd_getpath(dct: DeepDict, path: Sequence[str], default: Union[_DefaultT, _NoDefault]=_nodefault, *, t: Optional[Type[_DDCastT]]=None):
+def dd_getpath(dct: DeepDict, path: DeepDictPath, default: Union[_DefaultT, _NoDefault]=_nodefault, *, t: Optional[Type[_DDCastT]]=None) -> Any: # type: ignore[misc]
     """
     Retrieve a value from inside a nested dictionary.
     @param dct The nested mapping
@@ -40,7 +53,18 @@ def dd_getpath(dct: DeepDict, path: Sequence[str], default: Union[_DefaultT, _No
     d: Any = dct
     try:
         for pc in path:
-            d = d[pc]
+            if isinstance(pc, str):
+                d = d[pc]
+            else:
+                for candidate in pc:
+                    try:
+                        d = d[candidate]
+                    except KeyError:
+                        continue
+                    else:
+                        break
+                else:
+                    raise KeyError("Dictionary has none of key candidates %s" % pc)
         # XXX: runtime type check
         assert (t is None or isinstance(d, t)), f"Expected value at path {path} to be {t}, not {type(d)}"
         return d
@@ -157,7 +181,7 @@ class VdfParser:
                     escape = True
                 elif c == self.begin_char:
                     finish()
-                    if len(tokens) / 2 == len(tokens) // 2 and (self.strict or self.factory == dict):
+                    if len(tokens) / 2 == len(tokens) // 2 and (self.strict or self.factory is dict):
                         raise ValueError("Sub-dictionary cannot be a key")
                     tokens.append(self._parse_map(fd, True))
                 elif c == self.end_char:
@@ -339,17 +363,15 @@ class AppInfoFile:
     S_INT4 = struct.Struct("<I")
 
     @classmethod
-    def open(cls, filename) -> "AppInfoFile":
+    def open(cls, filename) -> Self:
         return cls(open(filename, "br"), close=True)
 
     def __init__(self, file, bvdf_parser=None, close=True):
         self.file = file
         self.parser = bvdf_parser if bvdf_parser is not None else BinaryVdfParser()
         self._close_file = close
-        self._universe = None
-        self._apps = None
 
-    def _load_map(self, offset: int) -> DeepDict:
+    def _load_offset(self, offset: int) -> DeepDict:
         self.file.seek(offset, io.SEEK_SET)
         return self.parser.parse(self.file)
 
@@ -371,20 +393,13 @@ class AppInfoFile:
 
         def __getitem__(self, key):
             if self._data is None:
-                self._data = self.appinfo._load_map(self.offset)
+                self._data = self.appinfo._load_offset(self.offset)
             return self._data[key]
 
-        def __getattr__(self, attr):
-            if attr in dir(dict):
-                if self._data is None:
-                    self._data = self.appinfo._load_map(self.offset)
-                return getattr(self._data, attr)
-            raise AttributeError(attr)
-
         @property
-        def dict(self):
+        def data(self):
             if self._data is None:
-                self._data = self.appinfo._load_map(self.offset)
+                self._data = self.appinfo._load_offset(self.offset)
             return self._data
 
     def _read_exactly(self, s: int) -> bytes:
@@ -396,7 +411,7 @@ class AppInfoFile:
     def _read_int(self) -> int:
         return self.S_INT4.unpack(self._read_exactly(self.S_INT4.size))[0]
 
-    def _load(self):
+    def _load_index(self) -> Tuple[int, Dict[int, App]]:
         magic = self._read_exactly(4)
         if magic == b"\x28\x44\x56\x07":
             header_struct = self.S_APP_HEADER_V2
@@ -405,8 +420,8 @@ class AppInfoFile:
         else:
             raise ValueError("Unknown appinfo.vdf magic")
 
-        self._universe = self._read_int()
-        self._apps = {}
+        universe = self._read_int()
+        apps = {}
 
         buffer = bytearray(header_struct.size)
 
@@ -420,45 +435,34 @@ class AppInfoFile:
             appid, size, *_ = struct
 
             if appid == 0:
-                return # Done
+                break # Done
             elif read < header_struct.size:
                 raise EOFError()
 
-            self._apps[appid] = self.App(self, self.file.tell(), struct)
+            apps[appid] = self.App(self, self.file.tell(), struct)
 
             self.file.seek(size - (header_struct.size - 8), io.SEEK_CUR)
 
-    @property
-    def universe(self):
-        if self._universe is None:
-            self._load()
-        return self._universe
+        return universe, apps
 
-    def __getattr__(self, attr):
-        if attr in dir(dict):
-            if self._apps is None:
-                self._load()
-            return getattr(self._apps, attr)
-        raise AttributeError(attr)
+    @cached_property
+    def universe(self) -> int:
+        universe, self.apps = self._load_index()
+        return universe
 
-    def __getitem__(self, key):
-        if self._apps is None:
-            self._load()
-        return self._apps[key]
+    @cached_property
+    def apps(self) -> Dict[int, App]:
+        self.universe, apps = self._load_index()
+        return apps
 
-    def __iter__(self):
-        if self._apps is None:
-            self._load()
-        return iter(self._apps)
+    def __getitem__(self, key: int) -> App:
+        return self.apps[key]
 
-    @property
-    def dict(self):
-        if self._apps is None:
-            self._load()
-        return self._apps
+    def __iter__(self) -> Iterator[App]:
+        return iter(self.apps.values())
 
     # Cleanup
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc, tp, tb):

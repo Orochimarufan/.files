@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-import sys, os
+import sys
+import os
 import fnmatch
 import re
 import itertools
@@ -13,11 +14,11 @@ import time
 from abc import ABCMeta, abstractmethod
 from copy import copy
 from getpass import getuser
-from pathlib import PurePath, Path, PureWindowsPath
-from typing import Iterable, Tuple, Dict, List, Union, Set, Callable, Any, Optional, TypeVar, Generic, Sequence, overload
+from pathlib import PurePath, Path
+from typing import Iterable, Tuple, Dict, List, Union, Set, Callable, Any, Optional, TypeVar, Generic, Sequence, overload, Literal, TypedDict
 from warnings import warn
 
-from propex import CachedProperty, SettableCachedProperty
+from propex import SettableCachedProperty, cached_property
 from steamutil import Steam, App
 
 
@@ -122,9 +123,15 @@ class SyncPath(Cloneable):
 
 
 class _SyncSetCommon(metaclass=ABCMeta):
-    files_from_local: CachedProperty[Set[Path]]
-    files_from_target: CachedProperty[Set[Path]]
-    files_unmodified: CachedProperty[Set[Path]]
+    @property
+    @abstractmethod
+    def files_from_local(self) -> Set[Path]: ...
+    @property
+    @abstractmethod
+    def files_from_target(self) -> Set[Path]: ...
+    @property
+    @abstractmethod
+    def files_unmodified(self) -> Set[Path]: ...
 
     def show_confirm(self, skip=True) -> bool:
         # XXX: move to SyncOp?
@@ -221,15 +228,15 @@ class SyncSet(_SyncSetCommon):
                 if f not in dst_files or sst.st_mtime > dst_files[f][1].st_mtime
         }
 
-    @CachedProperty
+    @cached_property
     def files_from_local(self) -> Set[Path]:
         return self._sync_set(self.local, self.target)
 
-    @CachedProperty
+    @cached_property
     def files_from_target(self) -> Set[Path]:
         return self._sync_set(self.target, self.local)
 
-    @CachedProperty
+    @cached_property
     def files_unmodified(self) -> Set[Path]:
         return (self.local.keys() | self.target.keys()) - (self.files_from_local | self.files_from_target)
 
@@ -267,15 +274,15 @@ class SyncMultiSet(list, _SyncSetCommon):
             return set()
         return functools.reduce(operator.or_, map(operator.attrgetter(attrname), self))
 
-    @CachedProperty
+    @cached_property
     def files_from_local(self) -> Set[Path]:
         return self._union_set("files_from_local")
 
-    @CachedProperty
+    @cached_property
     def files_from_target(self) -> Set[Path]:
         return self._union_set("files_from_target")
 
-    @CachedProperty
+    @cached_property
     def files_unmodified(self) -> Set[Path]:
         return self._union_set("files_unmodified")
 
@@ -321,12 +328,18 @@ class AbstractCommonPaths:
         is_windows: bool = True
         is_native_linux: bool = False
 
+        # abstract attribute
         @property
         @abstractmethod
-        def drive_c(self) -> P: pass
+        def drive_c(self) -> P: ...
 
-        # abstract attribute
-        my_documents: CachedProperty[P]
+        @property
+        @abstractmethod
+        def my_documents(self) -> P: ...
+
+        @property
+        @abstractmethod
+        def appdata_roaming(self) -> P: ...
 
     class Windows(WindowsCommon[P]):
         is_native_windows: bool = True
@@ -336,19 +349,27 @@ class AbstractCommonPaths:
         def drive_c(self) -> P:
             return self._path_factory("C:\\")
 
-        @CachedProperty
+        # Win32 API
+        CSIDL_PERSONAL  = 0x0005
+        CSIDL_APPDATA   = 0x001a
+
+        @staticmethod
+        def SHGetFolderPath(csidl: int) -> str:
+            import ctypes.wintypes
+            SHGFP_TYPE_CURRENT = 0   # Get current, not default value
+            buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+            shell32 = ctypes.windll.shell32 # type: ignore[attr-defined] # Windows only
+            shell32.SHGetFolderPathW(None, csidl, None, SHGFP_TYPE_CURRENT, buf)
+            return buf.value
+
+        @cached_property
         def my_documents(self) -> P:
             """ Get the Windows "My Documents" folder """
-            def get_my_documents():
-                import ctypes.wintypes
-                CSIDL_PERSONAL = 5       # My Documents
-                SHGFP_TYPE_CURRENT = 0   # Get current, not default value
+            return self._path_factory(self.SHGetFolderPath(self.CSIDL_PERSONAL))
 
-                buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
-                ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_PERSONAL, None, SHGFP_TYPE_CURRENT, buf)
-
-                return buf.value
-            return self._path_factory(get_my_documents())
+        @cached_property
+        def appdata_roaming(self) -> P:
+            return self._path_factory(self.SHGetFolderPath(self.CSIDL_APPDATA))
 
     class Wine(WindowsCommon[P]):
         is_native_windows: bool = False
@@ -379,6 +400,10 @@ class AbstractCommonPaths:
 
         @staticmethod
         def _find_file_ci(path: Path, candidates: Optional[Sequence[str]]=None, exclude: Optional[Sequence[str]]=None) -> List[Path]:
+            """ Find directory entry with casefolding
+            Note: candidates must already be lowercase """
+            if not path.exists():
+                return []
             entries: Dict[str, Path] = {p.name.lower(): p for p in path.iterdir() if p.is_dir()}
             results: List[Path] = []
             if candidates is not None:
@@ -392,7 +417,7 @@ class AbstractCommonPaths:
                 results.extend((path for name, path in entries.items() if name not in exclude and path not in results))
             return results
 
-        @CachedProperty
+        @cached_property
         def _wine_prefix_userprofile(self) -> Path:
             ## Try to find out the username in the prefix
             ## usually, this is the same as the system user, but
@@ -409,14 +434,23 @@ class AbstractCommonPaths:
         def home(self) -> P:
             return self._path_factory(self._wine_prefix_userprofile)
 
-        @CachedProperty
+        @cached_property
         def my_documents(self) -> P:
             """ Get the Windows "My Documents" folder """
-            ppath = self._wine_prefix_userprofile
-            # BUG: mypy#7781 overload staticmethod is broken when called on instance
-            candidates = self.__class__._find_file_ci(ppath, ['my documents', 'documents'])
+            candidates = self._find_file_ci(self._wine_prefix_userprofile, ['my documents', 'documents'])
             if not candidates:
-                raise FileNotFoundError(f"Could not find 'My Documents' folder in profile at '{ppath}'")
+                raise FileNotFoundError(f"Could not find 'My Documents' folder in profile at '{self._wine_prefix_userprofile}'")
+            return self._path_factory(candidates[0])
+
+        @cached_property
+        def appdata_roaming(self) -> P:
+            candidates = self._find_file_ci(self._wine_prefix_userprofile, ['appdata', 'application data'])
+            if not candidates:
+                raise FileNotFoundError(f"Could not find 'AppData/Roaming' folder in profile at '{self._wine_prefix_userprofile}'")
+            for candidate in candidates:
+                roaming = self._find_file_ci(candidate, ['roaming'])
+                if roaming:
+                    return self._path_factory(roaming[0])
             return self._path_factory(candidates[0])
 
     class Linux(Common[P]):
@@ -427,11 +461,11 @@ class AbstractCommonPaths:
 
         ## XDG
         # XXX: make it methods and search all locations?
-        @CachedProperty
+        @cached_property
         def xdg_config_dir(self) -> P:
             raise NotImplementedError()
 
-        @CachedProperty
+        @cached_property
         def xdg_data_dir(self) -> P:
             raise NotImplementedError()
 
@@ -441,9 +475,12 @@ class CommonPaths:
         def _path_factory(self, p: PathOrStr) -> Path:
             return Path(p)
 
-    class LinuxPaths(AbstractCommonPaths.Linux[Path], Mixin): pass
-    class WindowsPaths(AbstractCommonPaths.Windows[Path], Mixin): pass
-    class WinePaths(AbstractCommonPaths.Wine[Path], Mixin): pass
+    class LinuxPaths(AbstractCommonPaths.Linux[Path], Mixin):
+        pass
+    class WindowsPaths(AbstractCommonPaths.Windows[Path], Mixin):
+        pass
+    class WinePaths(AbstractCommonPaths.Wine[Path], Mixin):
+        pass
 
     Paths = Union[LinuxPaths, WindowsPaths, WinePaths]
     NativePaths = Union[LinuxPaths, WindowsPaths]
@@ -477,9 +514,12 @@ class CommonSyncPaths:
         def _path_factory(self, p: PathOrStr) -> SyncPath:
             return SyncPath(self.op, p)
 
-    class LinuxPaths(AbstractCommonPaths.Linux[SyncPath], Mixin): pass
-    class WindowsPaths(AbstractCommonPaths.Windows[SyncPath], Mixin): pass
-    class WinePaths(AbstractCommonPaths.Wine[SyncPath], Mixin): pass
+    class LinuxPaths(AbstractCommonPaths.Linux[SyncPath], Mixin):
+        pass
+    class WindowsPaths(AbstractCommonPaths.Windows[SyncPath], Mixin):
+        pass
+    class WinePaths(AbstractCommonPaths.Wine[SyncPath], Mixin):
+        pass
 
     Paths = Union[LinuxPaths, WindowsPaths, WinePaths]
 
@@ -498,6 +538,7 @@ class CommonSyncPaths:
 ### -----------------------------------------------------------------
 _AbstractSyncOp = TypeVar("_AbstractSyncOp", bound="AbstractSyncOp")
 
+
 class AbstractSyncOp(ISyncOp):
     parent: ISyncContext
     name: str # Abstract
@@ -506,7 +547,7 @@ class AbstractSyncOp(ISyncOp):
         self.parent = parent
 
     # Paths
-    @CachedProperty
+    @cached_property
     def paths(self) -> CommonSyncPaths.Paths:
         return CommonSyncPaths.create(self, None)
 
@@ -515,7 +556,7 @@ class AbstractSyncOp(ISyncOp):
 
     # Properties
     @SettableCachedProperty
-    def slug(self):
+    def slug(self) -> str:
         """ Name of the destination folder """
         return self.name
 
@@ -546,7 +587,7 @@ class AbstractSyncOp(ISyncOp):
                 % (self.name, self.__class__.__name__.replace("SyncOp", "")))
 
     def report_error(self, msg: Iterable[str]):
-        print("\033[31m"+"\n".join("  " + l for l in msg)+"\033[0m")
+        print("\033[31m"+"\n".join("  " + ln for ln in msg)+"\033[0m")
 
 
 class SteamSyncOp(AbstractSyncOp):
@@ -557,7 +598,7 @@ class SteamSyncOp(AbstractSyncOp):
         super().__init__(ssync)
         self.app = app
 
-    @CachedProperty
+    @cached_property
     def paths(self) -> CommonSyncPaths.Paths:
         return CommonSyncPaths.create(self, self.app.compat_prefix if self.app.is_proton_app else None)
 
@@ -650,7 +691,7 @@ class WineSyncOp(GenericFoundSyncOp):
         super().__init__(parent, name, found)
         self._wine_prefix = prefix
 
-    @CachedProperty
+    @cached_property
     def paths(self) -> CommonSyncPaths.Paths:
         return CommonSyncPaths.create(self, self._wine_prefix)
 
@@ -712,12 +753,12 @@ class NoSteamSync(ISyncContext):
 class SteamSync(NoSteamSync):
     steam: Steam
 
-    def __init__(self, target_path: Path, *, steam_path: Path = None):
+    def __init__(self, target_path: Path, *, steam_path: Optional[Path] = None):
         super().__init__(target_path)
         self.steam = Steam(steam_path)
 
     # Get Information
-    @CachedProperty
+    @cached_property
     def apps(self) -> List[App]:
         return list(self.steam.apps)
 

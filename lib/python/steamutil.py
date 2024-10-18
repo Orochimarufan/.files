@@ -1,14 +1,17 @@
 # Discover Steam install and games
 # (c) 2020 Taeyeon Mori CC-BY-SA
 
-import sys, os
-import re, fnmatch, datetime
+import datetime
+import fnmatch
+import os
+import re
+import sys
 
 from pathlib import Path
-from typing import List, Iterable, Dict, Literal, Mapping, Tuple, Callable, Optional, Union, Any, cast, overload
+from typing import List, Iterable, Dict, Literal, Mapping, Tuple, Optional, Union, Any, cast, overload
 
 from vdfparser import VdfParser, DeepDict, AppInfoFile, LowerCaseNormalizingDict, dd_getpath
-from propex import CachedProperty, SettableCachedProperty, DictPathProperty, DictPathRoProperty
+from propex import SettableCachedProperty, DictPathProperty, DictPathRoProperty, cached_property
 
 
 _vdf = VdfParser()
@@ -37,7 +40,7 @@ class AppInfo:
     installed   = False
 
     # AppInfo
-    @CachedProperty
+    @cached_property
     def appinfo(self):
         # FIXME: properly close AppInfoFile but also deal with always-open appinfo
         return self.steam.appinfo[self.appid]
@@ -60,7 +63,7 @@ class AppInfo:
     def is_native(self):
         return sys.platform in self.oslist
 
-    @CachedProperty
+    @cached_property
     def compat_tool(self) -> dict:
         mapping = self.steam.compat_tool_mapping
         appid = str(self.appid)
@@ -115,13 +118,13 @@ class App(AppInfo):
     language = DictPathRoProperty[Optional[str]]("manifest", ("AppState", "UserConfig", "language"), None)
     install_dir = DictPathRoProperty[Optional[str]]("manifest", ("AppState", "installdir"), None)
 
-    @CachedProperty
+    @cached_property
     def install_path(self) -> Path:
         return self.steamapps_path / "common" / self.install_dir
 
     # Workshop
     # TODO
-    @CachedProperty
+    @cached_property
     def workshop_path(self) -> Path:
         return self.steamapps_path / "workshop" / "content" / str(self.appid)
 
@@ -137,15 +140,15 @@ class App(AppInfo):
             return uc["platform_override_source"] == "windows" and uc["platform_override_dest"] == "linux"
         return None
 
-    @CachedProperty
+    @cached_property
     def compat_path(self) -> Path:
         return self.steamapps_path / "compatdata" / str(self.appid)
 
-    @CachedProperty
+    @cached_property
     def compat_prefix(self) -> Path:
         return self.compat_path / "pfx"
 
-    @CachedProperty
+    @cached_property
     def compat_drive(self) -> Path:
         return self.compat_prefix / "drive_c"
 
@@ -176,7 +179,7 @@ class LibraryFolder:
         return "<steamutil.LibraryFolder @ \"%s\">" % self.path
 
     # Paths
-    @CachedProperty
+    @cached_property
     def steamapps_path(self) -> Path:
         steamapps = self.path / "steamapps"
         if not steamapps.exists():
@@ -284,7 +287,7 @@ class LoginUser:
     account_name = DictPathRoProperty[str]("info", ("AccountName",))
     username = DictPathRoProperty[str]("info", ("PersonaName",))
 
-    @CachedProperty
+    @cached_property
     def userdata_path(self) -> Path:
         return self.steam.get_userdata_path(self)
 
@@ -292,7 +295,7 @@ class LoginUser:
     def localconfig_vdf(self) -> Path:
         return self.userdata_path / "config" / "localconfig.vdf"
 
-    @CachedProperty
+    @cached_property
     def localconfig(self) -> DeepDict:
         with open(self.localconfig_vdf, encoding="utf-8") as f:
             return _vdf.parse(f)
@@ -367,7 +370,7 @@ class Steam:
         return self.root / "config" / "loginusers.vdf"
 
     # Users
-    @CachedProperty
+    @cached_property
     def most_recent_user(self) -> Optional[LoginUser]:
         try:
             # Apparently, Steam doesn't care about case in the config/*.vdf keys
@@ -387,7 +390,7 @@ class Steam:
         return self.root / "userdata" / str(user_id)
 
     # Config
-    @CachedProperty
+    @cached_property
     def config(self) -> DeepDict:
         with open(self.config_vdf, encoding="utf-8") as f:
             return _vdf.parse(f)
@@ -397,11 +400,11 @@ class Steam:
     compat_tool_mapping = DictPathProperty[Dict]("config_software_steam", ("CompatToolMapping",))
 
     # AppInfo cache
-    @CachedProperty
+    @cached_property
     def appinfo_vdf(self):
         return self.root / "appcache" / "appinfo.vdf"
 
-    @property
+    @cached_property
     def appinfo(self) -> AppInfoFile:
         return AppInfoFile.open(self.appinfo_vdf)
 
@@ -410,7 +413,7 @@ class Steam:
         with self.appinfo as info:
             return info[891390]["appinfo"]
 
-    @CachedProperty
+    @cached_property
     def compat_tools(self) -> Dict[str, Dict]:
         tools = {}
         # Find official proton installs
@@ -440,7 +443,7 @@ class Steam:
         return tools
 
     # Game/App Library
-    @CachedProperty
+    @cached_property
     def library_folder_paths(self) -> List[Path]:
         with open(self.libraryfolders_vdf, encoding="utf-8") as f:
             data = _vdf_ci.parse(f)
@@ -455,7 +458,7 @@ class Steam:
                         raise ValueError("Unknown format of libraryfolders.vdf")
         return list(gen())
 
-    @CachedProperty
+    @cached_property
     def library_folders(self) -> List[LibraryFolder]:
         return [LibraryFolder(self, self.root)] + [LibraryFolder(self, p) for p in self.library_folder_paths]
 
