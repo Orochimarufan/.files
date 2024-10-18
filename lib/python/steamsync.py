@@ -47,7 +47,6 @@ _SyncPath = TypeVar("_SyncPath", bound="SyncPath")
 
 class ISyncContext:
     target_path: Path
-    home_path: Path
 
 
 class ISyncOp(metaclass=ABCMeta):
@@ -304,12 +303,6 @@ class AbstractCommonPaths:
         @abstractmethod
         def _path_factory(self, path: PathOrStr) -> P: pass
 
-        ## Basic
-        parent: ISyncContext
-
-        def __init__(self, *, parent):
-            self.parent = parent
-
         ## Platform
         is_wine: bool
         is_windows: bool
@@ -319,7 +312,7 @@ class AbstractCommonPaths:
         ## Common paths
         @property
         def home(self) -> P:
-            return self._path_factory(self.parent.home_path)
+            return self._path_factory(Path.home())
 
         def from_(self, path: PathOrStr) -> P:
             return self._path_factory(path)
@@ -487,19 +480,19 @@ class CommonPaths:
 
     @overload
     @classmethod
-    def create(c, parent: ISyncContext, wine_prefix: None) -> NativePaths: ...
+    def create(c, wine_prefix: None) -> NativePaths: ...
     @overload
     @classmethod
-    def create(c, parent: ISyncContext, wine_prefix: Path) -> WinePaths: ...
+    def create(c, wine_prefix: Path) -> WinePaths: ...
 
     @classmethod
-    def create(c, parent: ISyncContext, wine_prefix: Optional[Path]) -> Paths:
+    def create(c, wine_prefix: Optional[Path]=None) -> Paths:
         if wine_prefix is not None:
-            return c.WinePaths(parent=parent, prefix=wine_prefix)
+            return c.WinePaths(prefix=wine_prefix)
         elif sys.platform == 'win32':
-            return c.WindowsPaths(parent=parent)
+            return c.WindowsPaths()
         else:
-            return c.LinuxPaths(parent=parent)
+            return c.LinuxPaths()
 
 
 class CommonSyncPaths:
@@ -508,7 +501,7 @@ class CommonSyncPaths:
 
         def __init__(self, *, op: 'AbstractSyncOp', **kwds):
             # Not sure why this complains. Maybe because of the **kwds?
-            super().__init__(parent=op.parent, **kwds) #type: ignore
+            super().__init__(**kwds) #type: ignore
             self.op = op
 
         def _path_factory(self, p: PathOrStr) -> SyncPath:
@@ -531,6 +524,123 @@ class CommonSyncPaths:
             return c.WindowsPaths(op=op)
         else:
             return c.LinuxPaths(op=op)
+
+
+### -----------------------------------------------------------------
+#  Steam autocloud UFS
+### -----------------------------------------------------------------
+class SteamUfs:
+    # Schema
+    Platform = Literal["windows", "linux", "macos", "all"]
+    Root = Literal["gameinstall", "LinuxHome", "LinuxXdgDataHome", "MacHome", "WinMyDocuments", "WinAppDataRoaming", "WinAppDataLocal"]
+
+    class Entry(TypedDict, total=False):
+        platforms: dict[int, 'SteamUfs.Platform']
+        root: 'SteamUfs.Root'
+        path: str
+        pattern: str
+        siblings: str # ??? ref: #220
+        recursive: bool # ???
+
+    class Override(TypedDict):
+        platforms: dict[int, 'SteamUfs.Platform']
+        oldroot: 'SteamUfs.Root'
+        newroot: 'SteamUfs.Root'
+        path: str
+        replace: bool
+
+    class Ufs(TypedDict, total=False):
+        quota: int
+        maxnumfiles: int
+        hidecloudui: int
+        ignoreexternalfiles: int
+        savefiles: dict[int, 'SteamUfs.Entry']
+
+    # Context
+    user_id: int
+    paths: CommonSyncPaths.Paths
+
+    def __init__(self, paths: CommonSyncPaths.Paths, user_id: int=0):
+        self.user_id = user_id
+        self.paths = paths
+
+    steam3_types = 'IUMGAPCgT a' # https://developer.valvesoftware.com/wiki/SteamID#Types_of_Steam_Accounts
+    @property
+    def user_id_steam3(self) -> str:
+        account = self.user_id & 0xFFFFFFFF
+        type = self.steam3_types[self.user_id >> 52 & 0xF]
+        universe = self.user_id >> 56
+        return f"[{type}:{universe}:{account}]"
+
+    @property
+    def ufs_platform(self) -> Platform:
+        if self.paths.is_windows:
+            return "windows"
+        elif self.paths.is_native_linux:
+            return "linux"
+        raise NotImplementedError()
+
+    # Path placeholders
+    path_subst_vars = {
+        "64BitSteamID": lambda self: str(self.user_id),
+        "Steam3AccountID": lambda self: self.user_id_steam3,
+    }
+    path_subst_expr = re.compile(fr'\{{({"|".join(path_subst_vars.keys())})\}}')
+
+    def path_subst(self, path: str) -> str:
+        return self.path_subst_expr.sub(lambda m: self.path_subst_vars[m.group(1)](self), path)
+
+    # Resolution
+    def eval_entry(self, entry: Entry, gameinstall: SyncPath) -> Optional[SyncSet]:
+        # Filter by platform
+        if "platforms" in entry:
+            platforms = [platform.lower() for platform in entry["platforms"].values()]
+            if "all" not in platforms and self.ufs_platform not in platforms:
+                return None
+
+        # Find root anchor
+        root = entry["root"]
+        if root == "gameinstall":
+            path = gameinstall
+        elif root in ("LinuxHome", "MacHome"):
+            path = self.paths.home
+        elif isinstance(self.paths, AbstractCommonPaths.WindowsCommon):
+            if root == "WinMyDocuments":
+                path = self.paths.my_documents
+            elif root == "WinAppDataRoaming":
+                path = self.paths.appdata_roaming
+        else:
+            raise NotImplementedError("Steam Cloud UFS root %s not implemented on %s" % (root, self.paths.__class__.__name__))
+
+        # Add relative path
+        # XXX: Should path be prefixed or included in the target. Are there even apps with multiple ufs entries?
+        # For now, take last component?
+        if "path" in entry and entry["path"]:
+            rpath = Path(self.path_subst(entry["path"]))
+            if rpath.anchor:
+                # Fix paths with leading slash/backslash XXX: is this valid?
+                rpath = rpath.relative_to(rpath.anchor)
+            if len(rpath.parts) > 1:
+                path = path.prefix(rpath.parent)
+            path /= rpath.name
+
+        # Add files by pattern
+        sset = SyncSet(path)
+        sset.add(entry["pattern"])
+
+        # XXX: what about siblings and recursive keys?
+        return sset
+
+    def eval(self, ufs: Ufs, gameinstall: SyncPath) -> SyncMultiSet:
+        sms = SyncMultiSet()
+
+        for entry in ufs.get("savefiles", {}).values():
+            ss = self.eval_entry(entry, gameinstall)
+
+            if ss is not None:
+                sms.append(ss)
+
+        return sms
 
 
 ### -----------------------------------------------------------------
@@ -620,48 +730,9 @@ class SteamSyncOp(AbstractSyncOp):
     def steam_cloud_ufs(self) -> SyncMultiSet:
         if "ufs" not in self.app.appinfo["appinfo"] or "savefiles" not in self.app.appinfo["appinfo"]["ufs"]:
             raise ValueError("%r doesn't support Steam Cloud by way of UFS" % self.app)
-        sms = SyncMultiSet()
 
-        if sys.platform.startswith("win") or self.app.is_proton_app:
-            ufs_platform = "Windows"
-        elif sys.platform.startswith("linux"):
-            ufs_platform = "Linux"
-        else:
-            raise NotImplementedError("Steam Cloud UFS not (yet) supported on platform %s" % sys.platform)
-
-        for ufs_def in self.app.appinfo["appinfo"]["ufs"]["savefiles"].values():
-            # Filter by platform
-            if "platforms" in ufs_def and ufs_platform not in ufs_def["platforms"].values():
-                continue
-
-            # Find root anchor
-            root = ufs_def["root"]
-            if root == "WinMyDocuments":
-                path = self.paths.my_documents
-            elif root in ("LinuxHome", "MacHome"):
-                path = self.paths.home
-            else:
-                raise NotImplementedError("Steam Cloud UFS root %s not implemented for %r" % (root, self.app))
-
-            # Add relative path
-            # XXX: Should path be prefixed or included in the target. Are there even apps with multiple ufs entries?
-            # For now, take last component?
-            if "path" in ufs_def and ufs_def["path"]:
-                rpath = Path(ufs_def["path"])
-                if rpath.anchor:
-                    # Fix paths with leading slash/backslash XXX: is this valid?
-                    rpath = rpath.relative_to(rpath.anchor)
-                if len(rpath.parts) > 1:
-                    path = path.prefix(rpath.parent)
-                path /= rpath.name
-
-            # Add files by pattern
-            sset = SyncSet(path)
-            sset.add(ufs_def["pattern"])
-            # XXX: what about platform and recursive keys?
-            sms.append(sset)
-
-        return sms
+        ufs = SteamUfs(self.paths, self.app.steam.most_recent_user.id) # FIXME: Specify user ID
+        return ufs.eval(self.app.appinfo["appinfo"]["ufs"], self.game_directory)
 
 
 class GenericSyncOp(AbstractSyncOp):
@@ -712,15 +783,13 @@ AppNotFound = SyncNoOp()
 ### -----------------------------------------------------------------
 class NoSteamSync(ISyncContext):
     target_path: Path
-    home_path: Path
 
     def __init__(self, target_path: Path):
         self.target_path = Path(target_path)
-        self.home_path = Path.home()
 
-    @CachedProperty
+    @cached_property
     def paths(self) -> CommonPaths.NativePaths:
-        return CommonPaths.create(self, None)
+        return CommonPaths.create(None)
 
     def generic(self, name, find: Optional[Callable[[CommonPaths.NativePaths], Path]], *, platform=None) -> Union[GenericSyncOp, SyncNoOp]:
         """ Non-Steam App """
@@ -743,7 +812,9 @@ class NoSteamSync(ISyncContext):
         else:
             for prefix in prefixes:
                 prefixpath = Path(prefix)
-                paths = CommonPaths.create(self, prefixpath)
+                if not prefixpath.exists():
+                    continue
+                paths = CommonPaths.create(prefixpath)
                 search_path = find(paths)
                 if search_path.exists():
                     return WineSyncOp(self, name, prefixpath, search_path)
