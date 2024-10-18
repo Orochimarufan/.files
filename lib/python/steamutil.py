@@ -135,7 +135,7 @@ class App(AppInfo):
     # Steam Play info
     @property
     def platform_override(self) -> Tuple[Optional[str], Optional[str]]:
-        uc = dd_getpath(self.manifest, ("AppState", "UserConfig"), None, t=Dict[str, str])
+        uc = dd_getpath(self.manifest, ("AppState", "UserConfig"), None, t=dict)
         if uc:
             return uc.get("platform_override_source", None), uc.get("platform_override_dest", None)
         return None, None
