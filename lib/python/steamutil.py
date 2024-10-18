@@ -61,10 +61,14 @@ class AppInfo:
 
     @property
     def is_native(self):
+        """ Whether the app has a version native to the current platform """
         return sys.platform in self.oslist
 
     @cached_property
     def compat_tool(self) -> dict:
+        """ The compatibility tool selected for this app.
+        Note: this will still return a default if no tool is used
+        """
         mapping = self.steam.compat_tool_mapping
         appid = str(self.appid)
         # User override
@@ -130,15 +134,24 @@ class App(AppInfo):
 
     # Steam Play info
     @property
-    def is_steam_play(self) -> Optional[str]:
-        return dd_getpath(self.manifest, ("AppState", "UserConfig", "platform_override_source"), None, t=str)
+    def platform_override(self) -> Tuple[Optional[str], Optional[str]]:
+        uc = dd_getpath(self.manifest, ("AppState", "UserConfig"), None, t=Dict[str, str])
+        if uc:
+            return uc.get("platform_override_source", None), uc.get("platform_override_dest", None)
+        return None, None
+
+    @property
+    def is_steam_play(self) -> Union[str, bool]:
+        """ Whether app needs a compatibility tool to run """
+        if (po := self.platform_override[0]) is not None:
+            return po
+        return not self.is_native
 
     @property
     def is_proton_app(self) -> Optional[bool]:
-        uc = dd_getpath(self.manifest, ("AppState", "UserConfig"), None, t=dict)
-        if uc and "platform_override_source" in uc:
-            return uc["platform_override_source"] == "windows" and uc["platform_override_dest"] == "linux"
-        return None
+        """ Whether app needs (specifically) Proton to run """
+        # XXX: Should this try to figure out if selected compat tool is actually proton?
+        return self.platform_override[0] == "windows" or not self.is_native and "windows" in self.oslist
 
     @cached_property
     def compat_path(self) -> Path:
@@ -244,24 +257,19 @@ class UserAppConfig:
 
     @property
     def _data(self):
-        try:
-            return self.user.localconfig["UserLocalConfigStore"]["Software"]["Valve"]["Steam"]["Apps"][str(self.appid)]
-        except KeyError:
-            return {} # TODO
+        return dd_getpath(self.user.localconfig, ("UserLocalConfigStore", "Software", "Valve", "Steam", ("Apps", "apps"), str(self.appid)), {}, t=dict)
 
     @property
     def last_played(self) -> datetime.datetime:
-        return datetime.datetime.fromtimestamp(int(self._data.get("LastPlayed", "0")))
+        return datetime.datetime.fromtimestamp(int(self._data.get("LastPlayed", 0)))
 
     @property
     def playtime(self) -> datetime.time:
-        t = int(self._data.get("Playtime", "0"))
-        return datetime.time(t // 60, t % 60)
+        return datetime.time(minute=int(self._data.get("Playtime", 0)))
 
     @property
     def playtime_two_weeks(self) -> datetime.time:
-        t = int(self._data.get("Playtime2wks", "0"))
-        return datetime.time(t // 60, t % 60)
+        return datetime.time(minute=int(self._data.get("Playtime2wks", 0)))
 
     launch_options = DictPathProperty[Optional[DeepDict]]("_data", ("LaunchOptions",), None)
 
@@ -374,9 +382,8 @@ class Steam:
     def most_recent_user(self) -> Optional[LoginUser]:
         try:
             # Apparently, Steam doesn't care about case in the config/*.vdf keys
-            vdf_ci = VdfParser(factory=LowerCaseNormalizingDict)
             with open(self.loginusers_vdf, encoding="utf-8") as f:
-                data = vdf_ci.parse(f)
+                data = _vdf_ci.parse(f)
             for id, info in cast(Mapping[str, Dict], data["users"]).items():
                 if info["mostrecent"] == "1":
                     return LoginUser(self, int(id), info)
@@ -397,7 +404,7 @@ class Steam:
 
     config_install_store = DictPathProperty[Dict]("config", ("InstallConfigStore",))
     config_software_steam = DictPathProperty[Dict]("config", ("InstallConfigStore", "Software", "Valve", "Steam"))
-    compat_tool_mapping = DictPathProperty[Dict]("config_software_steam", ("CompatToolMapping",))
+    compat_tool_mapping = DictPathProperty[Dict]("config", ("InstallConfigStore", "Software", "Valve", "Steam", "CompatToolMapping"))
 
     # AppInfo cache
     @cached_property
@@ -425,21 +432,23 @@ class Steam:
                 tool["install_path"] = app.install_path
                 tools[name] = tool
         # Find custom compat tools
-        manifests = []
-        for p in (self.root / "compatibilitytools.d").iterdir():
-            if p.suffix == ".vdf":
-                manifests.append(p)
-            elif p.is_dir():
-                c = p / "compatibilitytool.vdf"
-                if c.exists():
-                    manifests.append(c)
-        for mfst_path in manifests:
-            with open(mfst_path, encoding="utf-8") as f:
-                mfst = _vdf.parse(f)
-            for name, t in dd_getpath(mfst, ("compatibilitytools", "compat_tools"), t=dict).items():
-                # TODO warn duplicate name
-                t["install_path"] = mfst_path.parent / t["install_path"]
-                tools[name] = t
+        compattools_d = self.root / "compatibilitytools.d"
+        if compattools_d.exists():
+            manifests = []
+            for p in compattools_d.iterdir():
+                if p.suffix == ".vdf":
+                    manifests.append(p)
+                elif p.is_dir():
+                    c = p / "compatibilitytool.vdf"
+                    if c.exists():
+                        manifests.append(c)
+            for mfst_path in manifests:
+                with open(mfst_path, encoding="utf-8") as f:
+                    mfst = _vdf.parse(f)
+                for name, t in dd_getpath(mfst, ("compatibilitytools", "compat_tools"), t=dict).items():
+                    # TODO warn duplicate name
+                    t["install_path"] = mfst_path.parent / t["install_path"]
+                    tools[name] = t
         return tools
 
     # Game/App Library
@@ -478,9 +487,9 @@ class Steam:
             if app is not None:
                 return app
         if not installed:
-            for appid, appinfo in self.appinfo.items():
-                if appid == id:
-                    return AppInfo(self, appid, appinfo_data=appinfo)
+            for appinfo in self.appinfo:
+                if appinfo.id == id:
+                    return AppInfo(self, id, appinfo_data=appinfo)
         return None
 
     @overload
@@ -495,22 +504,22 @@ class Steam:
             reg = re.compile(regexp, re.IGNORECASE)
             broken_ids = set()
             try:
-                for appid, appinfo in self.appinfo.items():
+                for appinfo in self.appinfo:
                     # Skip broken entries
                     try:
                         name = appinfo["appinfo"]["common"]["name"]
                     except KeyError:
-                        broken_ids.add(appid)
+                        broken_ids.add(appinfo.id)
                         continue
                     if reg.search(name):
                         for lf in self.library_folders:
-                            app = lf.get_app(appid)
+                            app = lf.get_app(appinfo.id)
                             if app:
                                 yield app
                                 break
                         else:
-                            yield AppInfo(self, appid, appinfo_data=appinfo)
-            except:
+                            yield AppInfo(self, appinfo.id, appinfo_data=appinfo)
+            except Exception:
                 import traceback
                 traceback.print_exc()
                 print("[SteamUtil] Warning: could not read non-installed apps from Steam appinfo cache. Searching locally")
