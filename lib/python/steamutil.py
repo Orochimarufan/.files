@@ -328,11 +328,10 @@ class Steam:
 
     @staticmethod
     def find_install_path() -> Optional[Path]:
-        # TODO: Windows
         # Linux
         if sys.platform.startswith("linux"):
             # Try ~/.steam first
-            dotsteam = Path(os.path.expanduser("~/.steam"))
+            dotsteam = Path("~/.steam").expanduser()
             if dotsteam.exists():
                 steamroot = (dotsteam / "root").resolve()
                 if steamroot.exists():
@@ -342,8 +341,12 @@ class Steam:
             for path in data_dir, Path("~").expanduser():
                 for name in "Steam", "SteamBeta":
                     steamroot = path / name
-                    if steamroot.exists():
+                    if (steamroot / "steamapps" / "libraryfolders.vdf").exists():
                         return steamroot
+            # Try Flatpak
+            appdir = Path("~/.var/app/com.valvesoftware.Steam").expanduser()
+            if appdir.exists():
+                return (appdir / ".steam" / "root").resolve()
         elif sys.platform.startswith("win"):
             try:
                 import winreg
@@ -362,6 +365,10 @@ class Steam:
                     if path.exists():
                         return path
         return None
+
+    @property
+    def is_flatpak(self) -> bool:
+        return self.root.is_relative_to(Path("~/.var/app/com.valvesoftware.Steam").expanduser())
 
     # Various paths
     @property
